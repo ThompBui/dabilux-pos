@@ -1,26 +1,89 @@
-@import "tailwindcss";
+/* styles/globals.css */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  body {
+    @apply bg-slate-100 dark:bg-slate-900;
+    font-family: 'Inter', sans-serif;
   }
 }
+/* Dán vào cuối file styles/globals.css */
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Lớp phủ mờ phía sau popup */
+.popup-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+/* Hiển thị popup khi có class 'active' */
+.popup-overlay.active {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* Khung chứa nội dung popup */
+.popup-container {
+    background-color: #ffffff;
+    border-radius: 1.5rem;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    width: 90%;
+    max-width: 480px;
+    transform: translateY(20px);
+    opacity: 0;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+/* Hiệu ứng trượt lên khi popup active */
+.popup-overlay.active .popup-container {
+    transform: translateY(0);
+    opacity: 1;
+}
+
+@layer components {
+  /* Lớp badge đã được sửa lỗi (bỏ các thuộc tính focus) */
+  .badge {
+    @apply inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors;
+  }
+  .badge-destructive {
+    @apply badge border-transparent bg-red-500 text-white dark:bg-red-700 dark:text-red-100;
+  }
+
+  /* CÁC LỚP CŨ CỦA BẠN ĐƯỢC GIỮ NGUYÊN */
+  .btn-action {
+    @apply inline-flex items-center gap-2 px-3 py-2 bg-slate-100 text-slate-700 rounded-lg font-semibold transition-colors dark:bg-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600;
+  }
+  .btn-action-outline {
+    @apply inline-flex items-center gap-2 px-3 py-2 bg-transparent border border-slate-300 dark:border-slate-600 rounded-lg font-semibold transition-colors hover:bg-slate-100 dark:hover:bg-slate-700;
+  }
+  .btn-payment {
+    @apply flex items-center justify-center gap-2 p-3 bg-slate-100 dark:bg-slate-700 rounded-xl font-semibold transition-colors hover:bg-slate-200 dark:hover:bg-slate-600;
+  }
+  .btn-payment.active {
+    @apply bg-indigo-100 text-indigo-600 ring-2 ring-indigo-500 dark:bg-indigo-900/50 dark:text-indigo-300;
+  }
+
+  .th-custom { 
+    @apply px-4 py-3; 
+  }
+  .td-custom { 
+    @apply px-4 py-3 border-b border-slate-200 dark:border-slate-700;
+  }
+  .quantity-input {
+    @apply w-16 text-center font-semibold bg-slate-100 dark:bg-slate-700 rounded-md p-1 border border-slate-300 dark:border-slate-600;
+  }
 }

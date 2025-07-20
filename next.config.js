@@ -1,8 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: 'export', // <<< THÊM DÒNG NÀY VÀO ĐÂY
   reactStrictMode: true,
   images: {
-    // Sử dụng cấu hình remotePatterns mới thay cho 'domains'
     remotePatterns: [
       {
         protocol: 'https',
@@ -13,7 +13,6 @@ const nextConfig = {
         hostname: 'firebasestorage.googleapis.com',
       },
     ],
-    // Cho phép Next.js xử lý và tối ưu ảnh dạng SVG
     dangerouslyAllowSVG: true,
   },
 };

@@ -1,23 +1,41 @@
-// components/PosSystemContent.js
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth, db } from '../firebase';
-import { collection, addDoc, doc, updateDoc, serverTimestamp, onSnapshot, runTransaction, increment, query, orderBy } from 'firebase/firestore';
+import {
+  collection,
+  addDoc,
+  doc,
+  updateDoc,
+  serverTimestamp,
+  onSnapshot,
+  runTransaction,
+  increment,
+  query,
+  orderBy,
+  where,
+  limit,
+  getDocs,
+  startAfter
+} from 'firebase/firestore';
 import {
     ShoppingBasket, Sun, Moon, Barcode, FileText, Calculator, Search,
     UserCircle, UserPlus, UserCheck, UserX, PauseCircle, CheckCircle,
-    Wallet, Landmark, /* QrCode, Ticket, */ Trash2, X, Printer, LogOut, Smartphone, // QrCode, Ticket đã được xóa
-    Bell, Archive, Loader2
+    Wallet, Trash2, X, Printer, LogOut, Bell, Archive, Loader2
 } from 'lucide-react';
-// import QRCode from 'qrcode'; // Đã xóa import QRCode
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
-import ProductSkeleton from '../components/ProductSkeleton';
+import ProductSkeleton from './ProductSkeleton';
 
-// --- UTILITY & SUB-COMPONENTS ---
+// --- CÁC HÀM HỖ TRỢ & COMPONENT CON ---
 const formatCurrency = (amount) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount || 0);
 const parseCurrency = (string) => parseFloat(String(string).replace(/[^\d]/g, '')) || 0;
+
+const CustomerModal = dynamic(() => import('./CustomerModal'), { ssr: false });
+const CalculatorModal = dynamic(() => import('./CalculatorModal'), { ssr: false });
+const ProductLookupModal = dynamic(() => import('./ProductLookupModal'), { ssr: false });
+const ReceiptModal = dynamic(() => import('./ReceiptModal'), { ssr: false });
+const NotificationPanel = dynamic(() => import('./NotificationPanel'), { ssr: false });
 
 function usePersistentState(key, defaultValue) {
     const [state, setState] = useState(defaultValue);
@@ -88,91 +106,35 @@ const Toast = ({ message, show }) => (
     </div>
 );
 
-const CalculatorModal = ({ show, onClose }) => {
-    const [display, setDisplay] = useState('0');
-    useEffect(() => {
-        if (!show) return;
-        const handleEsc = (event) => { if (event.key === 'Escape') onClose(); };
-        window.addEventListener('keydown', handleEsc);
-        return () => window.removeEventListener('keydown', handleEsc);
-    }, [onClose, show]);
-    const handleInput = (value) => { if (display === '0' || display === 'Error') setDisplay(value); else setDisplay(display + value); };
-    const handleClear = () => setDisplay('0');
-    const handleCalculate = () => { try { const result = new Function('return ' + display.replace(/[^-()\d/*+.]/g, ''))(); setDisplay(String(result)); } catch { setDisplay('Error'); } };
-    const buttons = ['7', '8', '9', '/', '4', '5', '6', '*', '1', '2', '3', '-', '0', '.', '=', '+'];
-    if (!show) return null;
-    return (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={onClose}>
-            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-xs m-4" onClick={e => e.stopPropagation()}>
-                <div className="p-4 flex justify-between items-center border-b border-slate-200 dark:border-slate-700">
-                    <h3 className="text-lg font-bold">Máy tính</h3>
-                    <button onClick={onClose} className="p-1 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700"><X size={20} /></button>
-                </div>
-                <div className="p-4">
-                    <div className="bg-slate-100 dark:bg-slate-900 text-right text-3xl font-mono p-4 rounded-lg mb-4 break-all">{display}</div>
-                    <div className="grid grid-cols-4 gap-2">
-                        <button onClick={handleClear} className="col-span-4 bg-red-500 hover:bg-red-600 text-white font-bold py-3 rounded-lg">C</button>
-                        {buttons.map(btn => (
-                            <button key={btn} onClick={() => (btn === '=') ? handleCalculate() : handleInput(btn)}
-                                className={`font-bold text-xl py-3 rounded-lg text-white ${btn === '=' ? 'bg-indigo-500 hover:bg-indigo-600' : 'bg-slate-500 dark:bg-slate-600 hover:bg-slate-600 dark:hover:bg-slate-700'}`}>
-                                {btn}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const NotificationPanel = ({ isOpen, onClose, notifications, onDismiss }) => {
-    const panelRef = useRef(null);
-    useEffect(() => {
-        const handleEsc = (event) => { if (event.key === 'Escape') onClose(); };
-        const handleClickOutside = (event) => { if (isOpen && panelRef.current && !panelRef.current.contains(event.target)) onClose(); };
-        if (isOpen) { document.addEventListener('keydown', handleEsc); document.addEventListener('mousedown', handleClickOutside); }
-        return () => { document.removeEventListener('keydown', handleEsc); document.removeEventListener('mousedown', handleClickOutside); };
-    }, [isOpen, onClose]);
-    if (!isOpen) return null;
-    return (
-        <div ref={panelRef} className="absolute top-full right-0 mt-2 w-80 bg-white dark:bg-slate-800 rounded-xl shadow-lg border dark:border-slate-700 z-30">
-            <div className="flex justify-between items-center p-3 border-b dark:border-slate-700"><h3 className="font-semibold text-sm">Thông báo Tồn kho</h3><button onClick={onClose} className="p-1 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700"><X size={16} /></button></div>
-            <div className="p-2 max-h-80 overflow-y-auto">
-                {notifications.length > 0 ? (notifications.map(product => (
-                    <div key={product.id} className="p-2 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded-md">
-                        <div><p className="text-sm font-medium">{product.name}</p><p className="text-xs text-red-500">Chỉ còn {product.stock} {product.unit}</p></div>
-                        <button onClick={() => onDismiss(product.id)} title="Đã xem, ẩn đi" className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600"><Archive size={16} /></button>
-                    </div>
-                ))) : (<p className="text-center text-sm text-slate-400 p-4">Không có thông báo mới.</p>)}
-            </div>
-        </div>
-    );
-};
-
-// --- START: Removed QrPaymentModal component (previously here) ---
-// const QrPaymentModal = ({ isOpen, onClose, qrUrl, amount, status, checkoutUrl }) => {
-//    // ... entire QrPaymentModal component code ...
-// };
-// --- END: Removed QrPaymentModal component ---
-
-// --- MAIN COMPONENT ---
+// --- COMPONENT CHÍNH ---
 export default function PosSystemContent() {
     const [user, authLoading] = useAuthState(auth);
     const router = useRouter();
-    const [products, setProducts] = useState([]);
+    
+    // State cho dữ liệu
+    const [allProducts, setAllProducts] = useState([]);
+    const [filteredProducts, setFilteredProducts] = useState([]);
     const [customers, setCustomers] = useState([]);
-    const [dataLoading, setDataLoading] = useState(true);
     const [storeInfo, setStoreInfo] = useState({ name: 'BuiAnh POS', logoUrl: '' });
+    
+    // State cho việc tải dữ liệu và phân trang
+    const [dataLoading, setDataLoading] = useState(true);
+    const [lastVisible, setLastVisible] = useState(null);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [hasMore, setHasMore] = useState(true);
+
+    // State cho giao diện và giỏ hàng
     const [theme, setTheme] = useState('light');
     const [currentTime, setCurrentTime] = useState(new Date());
     const [cart, setCart] = usePersistentState('pos-cart', []);
     const [currentCustomer, setCurrentCustomer] = usePersistentState('pos-customer', null);
     const [heldBills, setHeldBills] = usePersistentState('pos-heldBills', []);
-    const [activePaymentMethod, setActivePaymentMethod] = useState('cash'); // Chỉ còn "cash" là lựa chọn mặc định
+    const [activePaymentMethod, setActivePaymentMethod] = useState('cash');
     const [cashReceived, setCashReceived] = useState('');
     const [pointsToUse, setPointsToUse] = useState('');
-    const [filteredProducts, setFilteredProducts] = useState([]);
     const [activeCategory, setActiveCategory] = useState('all');
+    
+    // State cho modals và thông báo
     const [showCustomerModal, setShowCustomerModal] = useState(false);
     const [showCalculator, setShowCalculator] = useState(false);
     const [showProductLookup, setShowProductLookup] = useState(false);
@@ -182,25 +144,123 @@ export default function PosSystemContent() {
     const [lowStockProducts, setLowStockProducts] = useState([]);
     const [showNotifications, setShowNotifications] = useState(false);
     const [dismissedNotifications, setDismissedNotifications] = useState([]);
-    // const [isQrModalOpen, setIsQrModalOpen] = useState(false); // Đã xóa state này
-    // const [paymentLinkData, setPaymentLinkData] = useState(null); // Đã xóa state này
-    // const [paymentStatus, setPaymentStatus] = useState('PENDING'); // Đã xóa state này
     
-    // const [activeTransactionId, setActiveTransactionId] = useState(null); // Đã xóa state này
+    const showToast = useCallback((message) => {
+        setToast({ show: true, message });
+        setTimeout(() => setToast({ show: false, message: '' }), 3000);
+    }, []);
 
-    const CustomerModal = dynamic(() => import('../components/CustomerModal'), { ssr: false });
-    const CalculatorModal = dynamic(() => import('../components/CalculatorModal'), { ssr: false });
-    const ProductLookupModal = dynamic(() => import('../components/ProductLookupModal'), { ssr: false });
-    const ReceiptModal = dynamic(() => import('../components/ReceiptModal'), { ssr: false });
-    const showToast = (message) => { setToast({ show: true, message }); setTimeout(() => setToast({ show: false, message: '' }), 3000); };
+    // Tải dữ liệu ban đầu
+    useEffect(() => {
+        if (!user) return;
+
+        const unsubCustomers = onSnapshot(collection(db, 'customers'), (snapshot) => {
+            setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        });
+        const unsubStoreInfo = onSnapshot(doc(db, 'settings', 'storeInfo'), (docSnap) => {
+            if (docSnap.exists()) setStoreInfo(docSnap.data());
+        });
+
+        const fetchInitialProducts = async () => {
+            setDataLoading(true);
+            const productsRef = collection(db, 'products');
+            const q = query(
+                productsRef,
+                where('isActive', '!=', false),
+                orderBy('name', 'asc'),
+                limit(24)
+            );
+
+            const documentSnapshots = await getDocs(q);
+            const productsData = documentSnapshots.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const lastDoc = documentSnapshots.docs[documentSnapshots.docs.length - 1];
+
+            setLastVisible(lastDoc);
+            setAllProducts(productsData);
+            setFilteredProducts(productsData);
+
+            if (documentSnapshots.docs.length < 24) {
+                setHasMore(false);
+            }
+            setDataLoading(false);
+        };
+
+        fetchInitialProducts();
+
+        return () => {
+            unsubCustomers();
+            unsubStoreInfo();
+        };
+    }, [user]);
+
+    // Hàm tải thêm sản phẩm
+    const fetchMoreProducts = async () => {
+        if (!hasMore || loadingMore) return;
+        setLoadingMore(true);
+
+        const productsRef = collection(db, 'products');
+        const q = query(
+            productsRef,
+            where('isActive', '!=', false),
+            orderBy('name', 'asc'),
+            startAfter(lastVisible),
+            limit(24)
+        );
+
+        const documentSnapshots = await getDocs(q);
+        const newProductsData = documentSnapshots.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const lastDoc = documentSnapshots.docs[documentSnapshots.docs.length - 1];
+
+        setLastVisible(lastDoc);
+        const updatedProducts = [...allProducts, ...newProductsData];
+        setAllProducts(updatedProducts);
+        
+        if (activeCategory === 'all') {
+            setFilteredProducts(updatedProducts);
+        } else {
+            setFilteredProducts(updatedProducts.filter(p => p.category === activeCategory));
+        }
+
+        if (documentSnapshots.docs.length < 24) {
+            setHasMore(false);
+        }
+        setLoadingMore(false);
+    };
+
+    // Các useEffect khác
+    useEffect(() => { if (!authLoading && !user) router.push('/login'); }, [user, authLoading, router]);
     
-    const resetTransaction = useCallback(() => {
-        setCart([]);
-        setCurrentCustomer(null);
-        setCashReceived('');
-        setPointsToUse('');
-    }, [setCart, setCurrentCustomer]);
+    useEffect(() => {
+        const root = window.document.documentElement;
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        setTheme(savedTheme);
+        root.classList.toggle('dark', savedTheme === 'dark');
+    }, []);
 
+    useEffect(() => {
+        const root = window.document.documentElement;
+        root.classList.toggle('dark', theme === 'dark');
+        localStorage.setItem('theme', theme);
+    }, [theme]);
+    
+    useEffect(() => {
+        const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+        return () => clearInterval(timer);
+    }, []);
+    
+    useEffect(() => { setPointsToUse(''); }, [currentCustomer]);
+
+    useEffect(() => {
+        if (dataLoading) return;
+        if (activeCategory === 'all') {
+            setFilteredProducts(allProducts);
+        } else {
+            setFilteredProducts(allProducts.filter(p => p.category === activeCategory));
+        }
+    }, [activeCategory, allProducts, dataLoading]);
+    
+    const categories = useMemo(() => ['all', ...new Set(allProducts.map(p => p.category).filter(Boolean))], [allProducts]);
+    
     const { subtotal, tax, total } = useMemo(() => {
         const sub = cart.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 0), 0);
         return { subtotal: sub, tax: sub * 0.1, total: sub * 1.1 };
@@ -215,215 +275,42 @@ export default function PosSystemContent() {
 
     const totalAfterDiscount = useMemo(() => total - discountAmount, [total, discountAmount]);
 
-    // Calculate changeAmount based on cashReceived and totalAfterDiscount
     const changeAmount = useMemo(() => {
         const received = parseCurrency(cashReceived);
-        return received - totalAfterDiscount;
+        return received > totalAfterDiscount ? received - totalAfterDiscount : 0;
     }, [cashReceived, totalAfterDiscount]);
 
-    const finalizeSale = useCallback(async (saleCart, saleCustomer, salePointsUsedStr, paymentMethod) => {
-        if (!saleCart || saleCart.length === 0) {
-            showToast("Lỗi: Không có thông tin giỏ hàng để xử lý.");
-            return;
-        }
-        
-        try {
-            await runTransaction(db, async (transaction) => {
-                const saleSubtotal = saleCart.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 0), 0);
-                const saleTax = saleSubtotal * 0.1;
-                const saleTotal = saleSubtotal + saleTax;
-                const salePointsUsed = parseCurrency(salePointsUsedStr);
-                
-                let saleDiscountAmount = 0;
-                if(saleCustomer && salePointsUsed > 0) {
-                    const availablePoints = saleCustomer.points || 0;
-                    const pointsToUseValue = Math.min(salePointsUsed, availablePoints);
-                    saleDiscountAmount = Math.min(pointsToUseValue * 1000, saleTotal);
-                }
-                const saleTotalAfterDiscount = saleTotal - saleDiscountAmount;
+    const resetTransaction = useCallback(() => {
+        setCart([]);
+        setCurrentCustomer(null);
+        setCashReceived('');
+        setPointsToUse('');
+    }, [setCart, setCurrentCustomer]);
 
-                let finalCustomerData = saleCustomer ? { ...saleCustomer } : null;
-                let pointsEarnedThisTransaction = 0, pointsUsedThisTransaction = 0;
-                
-                const productRefs = saleCart.map(item => doc(db, 'products', item.id));
-                const productDocs = await Promise.all(productRefs.map(ref => transaction.get(ref)));
-                
-                for (let i = 0; i < productDocs.length; i++) {
-                    const productDoc = productDocs[i], cartItem = saleCart[i];
-                    if (!productDoc.exists()) throw new Error(`Sản phẩm "${cartItem.name}" không còn tồn tại.`);
-                    if (productDoc.data().stock < cartItem.quantity) throw new Error(`Tồn kho không đủ cho "${cartItem.name}".`);
-                }
-                
-                if (finalCustomerData) {
-                    const customerRef = doc(db, 'customers', finalCustomerData.id);
-                    const customerDoc = await transaction.get(customerRef);
-                    const serverPoints = customerDoc.exists() ? (customerDoc.data().points || 0) : 0;
-                    pointsUsedThisTransaction = Math.min(salePointsUsed, serverPoints);
-                    pointsEarnedThisTransaction = Math.floor(saleSubtotal / 10000);
-                    const finalCustomerPoints = serverPoints - pointsUsedThisTransaction + pointsEarnedThisTransaction;
-                    transaction.update(customerRef, { points: finalCustomerPoints });
-                    finalCustomerData.points = finalCustomerPoints;
-                }
-                
-                for (let i = 0; i < productRefs.length; i++) {
-                    transaction.update(productRefs[i], { stock: increment(-saleCart[i].quantity) });
-                }
-                
-                const billData = { items: saleCart, customer: finalCustomerData, subtotal: saleSubtotal, tax: saleTax, discountAmount: saleDiscountAmount, totalAfterDiscount: saleTotalAfterDiscount, paymentMethod, createdBy: user.email, createdAt: serverTimestamp(), pointsEarned: pointsEarnedThisTransaction, pointsUsed: pointsUsedThisTransaction, storeInfo };
-                const newBillRef = doc(collection(db, 'bills'));
-                transaction.set(newBillRef, billData);
-                setLastReceiptData({ ...billData, createdAt: new Date(), customer: finalCustomerData, storeInfo });
-            });
-            setShowReceiptModal(true);
-            resetTransaction();
-        } catch (error) {
-            console.error("Lỗi khi hoàn tất đơn hàng:", error);
-            showToast(`Lỗi: ${error.message}`);
-        }
-    }, [user, storeInfo, resetTransaction, showToast]);
-
-    // --- START: Removed PayOS/QR related useEffects ---
-    // useEffect(() => {
-    //     const { orderCode, status } = router.query;
-    //     if (status && orderCode) {
-    //         const pendingOrderJSON = localStorage.getItem(`order-${orderCode}`);
-    //         if (pendingOrderJSON) {
-    //             setIsQrModalOpen(true);
-    //             const pendingOrder = JSON.parse(pendingOrderJSON);
-    //             if (status === 'PAID') {
-    //                 setPaymentStatus('PAID');
-    //                 setTimeout(() => {
-    //                     finalizeSale(pendingOrder.cart, pendingOrder.customer, pendingOrder.pointsToUse, 'qr');
-    //                     setIsQrModalOpen(false);
-    //                 }, 2000);
-    //             } else {
-    //                 setPaymentStatus('CANCELLED');
-    //             }
-    //             localStorage.removeItem(`order-${orderCode}`);
-    //             router.replace('/', undefined, { shallow: true });
-    //         }
-    //     }
-    // }, [router, finalizeSale, showToast]);
-    
-    // useEffect(() => {
-    //     if (!activeTransactionId) return;
-    //     const unsubscribe = onSnapshot(doc(db, "transactions", activeTransactionId), (docSnap) => { ... });
-    //     return () => unsubscribe();
-    // }, [activeTransactionId]);
-    // --- END: Removed PayOS/QR related useEffects ---
-
-    useEffect(() => {
-        const lowStock = products.filter(p => p.stock <= 10 && p.isActive !== false);
-        setLowStockProducts(lowStock);
-    }, [products]);
-    
-    useEffect(() => {
-        const dismissed = localStorage.getItem('dismissedLowStockAlerts');
-        if (dismissed) { setDismissedNotifications(JSON.parse(dismissed)); }
-    }, []);
-    
-    const undismissedNotifications = useMemo(() => {
-        return lowStockProducts.filter(p => !dismissedNotifications.includes(p.id));
-    }, [lowStockProducts, dismissedNotifications]);
-    
-useEffect(() => {
-    if (!authLoading) {
-        if (!user) {
-            if (router.pathname !== '/login') {
-                router.push('/login');
-            }
-        }
-    }
-}, [user, authLoading, router]);    
-    useEffect(() => {
-        const root = window.document.documentElement; const savedTheme = localStorage.getItem('theme') || 'light'; setTheme(savedTheme); root.classList.toggle('dark', savedTheme === 'dark');
-    }, []);
-    
-    useEffect(() => {
-        const root = window.document.documentElement; root.classList.toggle('dark', theme === 'dark'); localStorage.setItem('theme', theme);
-    }, [theme]);
-    
-    useEffect(() => {
-        const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-        return () => clearInterval(timer);
-    }, []);
-    
-    useEffect(() => {
-    let productsLoaded = false;
-    let customersLoaded = false;
-    let storeInfoLoaded = false;
-
-    const checkAllDataLoaded = () => {
-        if (productsLoaded && customersLoaded && storeInfoLoaded) {
-            setDataLoading(false);
-        }
-    };
-
-    const productsQuery = query(collection(db, 'products'), orderBy('name', 'asc'));
-    const unsubProducts = onSnapshot(productsQuery, (snapshot) => {
-        setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        if (!productsLoaded) {
-            productsLoaded = true;
-            checkAllDataLoaded();
-        }
-    });
-
-    const unsubCustomers = onSnapshot(collection(db, 'customers'), (snapshot) => {
-        setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        if (!customersLoaded) {
-            customersLoaded = true;
-            checkAllDataLoaded();
-        }
-    });
-
-    const unsubStoreInfo = onSnapshot(doc(db, 'settings', 'storeInfo'), (docSnap) => {
-        if (docSnap.exists()) setStoreInfo(docSnap.data());
-        if (!storeInfoLoaded) {
-            storeInfoLoaded = true;
-            checkAllDataLoaded();
-        }
-    });
-
-    return () => { unsubProducts(); unsubCustomers(); unsubStoreInfo(); };
-}, []);
-    
-    useEffect(() => {
-        const activeProducts = products.filter(p => p.isActive !== false);
-        if (activeCategory === 'all') {
-            setFilteredProducts(activeProducts);
-        } else {
-            setFilteredProducts(activeProducts.filter(p => p.category === activeCategory));
-        }
-    }, [activeCategory, products]);
-    
-    useEffect(() => { setPointsToUse(''); }, [currentCustomer]);
-    
-    const categories = useMemo(() => ['all', ...new Set(products.filter(p => p.isActive !== false).map(p => p.category).filter(Boolean))], [products]);
-    const denominations = [10000, 20000, 50000, 100000, 200000, 500000];
-    
+    // Các hàm xử lý giỏ hàng và thanh toán
     const handleAddToCart = useCallback((product) => {
         if (!product || !product.id) { showToast("Lỗi: Sản phẩm không hợp lệ."); return; }
-        if (product.stock <= 0) { showToast(`Sản phẩm "${product.name}" đã hết hàng!`); return; }
+        if (product.stock <= 0) { showToast(`"${product.name}" đã hết hàng!`); return; }
         setCart(prevCart => {
             const existingItem = prevCart.find(item => item.id === product.id);
             if (existingItem) {
-                if (existingItem.quantity >= product.stock) { showToast(`Đã đạt số lượng tồn kho tối đa.`); return prevCart; }
+                if (existingItem.quantity >= product.stock) { showToast(`Đã đạt số lượng tồn kho.`); return prevCart; }
                 return prevCart.map(item => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item);
             }
             return [...prevCart, { ...product, quantity: 1 }];
         });
-    }, [products, setCart]);
+    }, [setCart, showToast]);
     
     const handleUpdateQuantity = useCallback((productId, newQuantityStr) => {
         const newQuantity = Math.max(1, parseInt(newQuantityStr, 10) || 1);
-        const product = products.find(p => p.id === productId);
-        if (product && newQuantity > product.stock) {
-            showToast(`Chỉ còn ${product.stock} sản phẩm "${product.name}" trong kho.`);
-            setCart(prevCart => prevCart.map(item => item.id === productId ? { ...item, quantity: product.stock } : item));
+        const productInAll = allProducts.find(p => p.id === productId);
+        if (productInAll && newQuantity > productInAll.stock) {
+            showToast(`Chỉ còn ${productInAll.stock} "${productInAll.name}" trong kho.`);
+            setCart(prevCart => prevCart.map(item => item.id === productId ? { ...item, quantity: productInAll.stock } : item));
             return;
         }
         setCart(prevCart => prevCart.map(item => item.id === productId ? { ...item, quantity: newQuantity } : item));
-    }, [products, setCart]);
+    }, [allProducts, setCart, showToast]);
     
     const handleRemoveFromCart = useCallback((productId) => { setCart(prev => prev.filter(item => item.id !== productId)); }, [setCart]);
     const handleCategoryFilter = useCallback((category) => { setActiveCategory(category); }, []);
@@ -433,8 +320,8 @@ useEffect(() => {
             const docRef = await addDoc(collection(db, "customers"), { ...newCustomerData, points: 0, createdAt: serverTimestamp() });
             setCurrentCustomer({ id: docRef.id, ...newCustomerData, points: 0 });
             showToast("Thêm khách hàng thành công!");
-        } catch (e) { console.error("Lỗi thêm khách hàng: ", e); showToast("Lỗi: Không thể thêm khách hàng."); }
-    }, [setCurrentCustomer]);
+        } catch (e) { showToast("Lỗi: Không thể thêm khách hàng."); }
+    }, [setCurrentCustomer, showToast]);
     
     const handleHoldBill = () => {
         if (cart.length === 0) { showToast('Không có hóa đơn để giữ!'); return; }
@@ -446,7 +333,9 @@ useEffect(() => {
     const handleRestoreBill = (billId) => {
         const bill = heldBills.find(b => b.id === billId);
         if (bill) {
-            setCart(bill.cart); setCurrentCustomer(bill.customer); setPointsToUse(bill.pointsToUse || '');
+            setCart(bill.cart);
+            setCurrentCustomer(bill.customer);
+            setPointsToUse(bill.pointsToUse || '');
             setHeldBills(prev => prev.filter(b => b.id !== billId));
             showToast('Đã khôi phục hóa đơn.');
         }
@@ -460,28 +349,66 @@ useEffect(() => {
     
     const handleClearCashReceived = () => { setCashReceived(''); };
 
-    const handleDismissNotification = (productId) => {
-        const newDismissed = [...dismissedNotifications, productId];
-        setDismissedNotifications(newDismissed);
-        localStorage.setItem('dismissedLowStockAlerts', JSON.stringify(newDismissed));
-    };
-    
-    // --- START: Removed handleCreatePayOSLink function ---
-    // const handleCreatePayOSLink = async () => { /* ... entire function ... */ };
-    // --- END: Removed handleCreatePayOSLink function ---
-    
+    const finalizeSale = useCallback(async (saleCart, saleCustomer, salePointsUsedStr, paymentMethod) => {
+        if (!saleCart || saleCart.length === 0) { showToast("Lỗi: Giỏ hàng trống."); return; }
+        
+        try {
+            await runTransaction(db, async (transaction) => {
+                const saleSubtotal = saleCart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+                const saleTax = saleSubtotal * 0.1;
+                const saleTotal = saleSubtotal + saleTax;
+                const salePointsUsed = parseCurrency(salePointsUsedStr);
+                let saleDiscountAmount = 0;
+                if(saleCustomer && salePointsUsed > 0) {
+                    saleDiscountAmount = Math.min(salePointsUsed * 1000, saleTotal);
+                }
+                const saleTotalAfterDiscount = saleTotal - saleDiscountAmount;
+
+                for (const cartItem of saleCart) {
+                    const productRef = doc(db, 'products', cartItem.id);
+                    const productDoc = await transaction.get(productRef);
+                    if (!productDoc.exists() || productDoc.data().stock < cartItem.quantity) {
+                        throw new Error(`Tồn kho không đủ cho "${cartItem.name}".`);
+                    }
+                    transaction.update(productRef, { stock: increment(-cartItem.quantity) });
+                }
+                
+                let finalCustomerData = null;
+                if (saleCustomer) {
+                    const customerRef = doc(db, 'customers', saleCustomer.id);
+                    const customerDoc = await transaction.get(customerRef);
+                    const serverPoints = customerDoc.exists() ? (customerDoc.data().points || 0) : 0;
+                    const pointsUsedThisTransaction = Math.min(salePointsUsed, serverPoints);
+                    const pointsEarnedThisTransaction = Math.floor(saleSubtotal / 10000);
+                    const finalCustomerPoints = serverPoints - pointsUsedThisTransaction + pointsEarnedThisTransaction;
+                    transaction.update(customerRef, { points: finalCustomerPoints });
+                    finalCustomerData = { ...saleCustomer, points: finalCustomerPoints };
+                }
+                
+                const billData = { items: saleCart, customer: finalCustomerData, subtotal: saleSubtotal, tax: saleTax, discountAmount: saleDiscountAmount, totalAfterDiscount: saleTotalAfterDiscount, paymentMethod, createdBy: user.email, createdAt: serverTimestamp(), pointsEarned: finalCustomerData ? Math.floor(saleSubtotal / 10000) : 0, pointsUsed: finalCustomerData ? Math.min(salePointsUsed, saleCustomer.points || 0) : 0, storeInfo };
+                transaction.set(doc(collection(db, 'bills')), billData);
+                setLastReceiptData({ ...billData, createdAt: new Date(), customer: finalCustomerData, storeInfo });
+            });
+            setShowReceiptModal(true);
+            resetTransaction();
+        } catch (error) {
+            showToast(`Lỗi thanh toán: ${error.message}`);
+        }
+    }, [user, storeInfo, resetTransaction, showToast]);
+
     const initiateCheckout = () => {
-        // Chỉ giữ lại logic thanh toán tiền mặt
         if (activePaymentMethod === 'cash') {
             if (totalAfterDiscount > 0 && (parseCurrency(cashReceived) < totalAfterDiscount)) {
-                showToast('Số tiền nhận được không đủ!'); return;
+                showToast('Số tiền khách đưa không đủ!');
+                return;
             }
             finalizeSale(cart, currentCustomer, pointsToUse, 'cash');
         }
-        // Đã xóa phần else { handleCreatePayOSLink(); }
     };
-    
-    if (authLoading || dataLoading) { return <div className="flex items-center justify-center h-screen bg-slate-100 dark:bg-slate-900"><p className="text-lg font-semibold">Đang tải dữ liệu...</p></div>; }
+
+    if (authLoading) {
+        return <div className="flex items-center justify-center h-screen bg-slate-100 dark:bg-slate-900"><p className="text-lg font-semibold">Đang kiểm tra đăng nhập...</p></div>;
+    }
 
     return (
         <>
@@ -489,14 +416,7 @@ useEffect(() => {
                 <div className="w-[500px] flex-shrink-0 flex flex-col h-screen">
                     <header className="bg-white dark:bg-slate-800/50 backdrop-blur-sm border-b border-r border-slate-200 dark:border-slate-700 p-3 flex items-center justify-between flex-shrink-0">
                         <div className="flex items-center gap-3">
-<Image 
-    src={storeInfo.logoUrl || 'https://placehold.co/40x40/6366f1/ffffff?text=POS'} 
-    alt="Logo" 
-    width={40} 
-    height={40}
-    className="object-contain rounded-md bg-slate-200"
-    unoptimized={true}
-/>
+                            <Image src={storeInfo.logoUrl || 'https://placehold.co/40x40/6366f1/ffffff?text=POS'} alt="Logo" width={40} height={40} className="object-contain rounded-md bg-slate-200"/>
                             <div><h1 className="text-lg font-bold">{storeInfo.name}</h1><p className="text-xs text-slate-500 dark:text-slate-400">Quầy 01 - {user.displayName || user.email}</p></div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -504,15 +424,15 @@ useEffect(() => {
                             <button onClick={() => setTheme(t => t === 'light' ? 'dark' : 'light')} className="p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700" title="Đổi giao diện">{theme === 'light' ? <Moon size={20}/> : <Sun size={20}/>}</button>
                         </div>
                     </header>
-                    <div className="p-4 bg-white dark:bg-slate-800 border-b border-r border-slate-200 dark:border-slate-700"><div className="relative"><Barcode className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 text-slate-400"/><input type="text" placeholder="Quét mã vạch hoặc nhập tên (F3)..." className="w-full bg-slate-100 dark:bg-slate-700 rounded-lg pl-14 pr-4 py-4 text-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none" onKeyPress={(e) => { if (e.key === 'Enter') { const code = e.target.value.trim(); if(code) { const found = products.find(p => p.barcode === code); if (found) { handleAddToCart(found); e.target.value = ''; } else { showToast('Sản phẩm không tồn tại'); } } } }}/></div></div>
+                    <div className="p-4 bg-white dark:bg-slate-800 border-b border-r border-slate-200 dark:border-slate-700"><div className="relative"><Barcode className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 text-slate-400"/><input type="text" placeholder="Quét mã vạch hoặc nhập tên (F3)..." className="w-full bg-slate-100 dark:bg-slate-700 rounded-lg pl-14 pr-4 py-4 text-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"/></div></div>
                     <div className="flex-grow p-4 flex flex-col border-r border-slate-200 dark:border-slate-700 overflow-hidden"><div className="flex-grow overflow-y-auto relative">
                         <table className="w-full text-sm text-left table-fixed">
                             <thead className="text-xs text-slate-700 dark:text-slate-300 uppercase bg-slate-50 dark:bg-slate-700/50 sticky top-0 z-10">
                                 <tr>
                                     <th className="px-4 py-2 w-[8%]">#</th>
-                                    <th className="px-4 py-2 w-[42%]">Tên sản phẩm</th>
-                                    <th className="px-4 py-2 w-[20%] text-center">Số lượng</th>
-                                    <th className="px-4 py-2 w-[20%] text-right">Thành tiền</th>
+                                    <th className="px-4 py-2 w-[42%]">Sản phẩm</th>
+                                    <th className="px-4 py-2 w-[20%] text-center">SL</th>
+                                    <th className="px-4 py-2 w-[20%] text-right">T.Tiền</th>
                                     <th className="px-4 py-2 w-[10%] text-center">Xóa</th>
                                 </tr>
                             </thead>
@@ -521,13 +441,9 @@ useEffect(() => {
                                     <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
                                         <td className="px-4 py-3">{index + 1}</td>
                                         <td className="px-4 py-3 font-semibold truncate">{item.name}</td>
-                                        <td className="px-4 py-3">
-                                            <input type="number" value={item.quantity} min="1" onChange={(e) => handleUpdateQuantity(item.id, e.target.value)} className="w-20 mx-auto text-center bg-slate-100 dark:bg-slate-700 rounded-md p-1 border-slate-300 dark:border-slate-600"/>
-                                        </td>
+                                        <td className="px-4 py-3"><input type="number" value={item.quantity} min="1" onChange={(e) => handleUpdateQuantity(item.id, e.target.value)} className="w-20 mx-auto text-center bg-slate-100 dark:bg-slate-700 rounded-md p-1 border-slate-300 dark:border-slate-600"/></td>
                                         <td className="px-4 py-3 text-right font-bold">{formatCurrency(item.price * item.quantity)}</td>
-                                        <td className="px-4 py-3 text-center">
-                                            <button onClick={() => handleRemoveFromCart(item.id)} className="text-red-500 hover:text-red-700"><Trash2 className="w-5 h-5 mx-auto"/></button>
-                                        </td>
+                                        <td className="px-4 py-3 text-center"><button onClick={() => handleRemoveFromCart(item.id)} className="text-red-500 hover:text-red-700"><Trash2 className="w-5 h-5 mx-auto"/></button></td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -535,49 +451,40 @@ useEffect(() => {
                         {cart.length === 0 && (<div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 dark:text-slate-500"><FileText className="w-24 h-24 mb-4"/><p className="font-medium text-lg">Hóa đơn trống</p></div>)}
                     </div><div className="flex-shrink-0 pt-4 mt-auto flex items-center gap-2"><button onClick={() => setShowCalculator(true)} className="btn-action-outline"><Calculator size={18}/>Máy tính</button><button onClick={() => setShowProductLookup(true)} className="btn-action-outline"><Search size={18}/>Tra cứu</button><button onClick={() => { if(cart.length > 0) { setLastReceiptData({ items: cart, customer: currentCustomer, subtotal, tax, discountAmount, totalAfterDiscount, createdBy: user.displayName, createdAt: new Date(), storeInfo }); setShowReceiptModal(true); }}} disabled={cart.length === 0} className="btn-action-outline disabled:opacity-50"><Printer size={18}/>In tạm</button></div></div>
                 </div>
+
                 <div className="flex-1 flex flex-col h-screen bg-slate-50 dark:bg-slate-900/50 border-r border-slate-200 dark:border-slate-700">
                    <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex-shrink-0 flex justify-between items-center">
                         <h2 className="text-lg font-bold">Danh mục sản phẩm</h2>
                         <div className="flex items-center gap-2">
-                            <div className="relative">
-                                <button onClick={() => setShowNotifications(prev => !prev)} className="p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700" title="Thông báo">
-                                    <Bell size={20}/>
-                                    {undismissedNotifications.length > 0 && (<span className="absolute top-1 right-1 block h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-slate-800/50"></span>)}
-                                </button>
-                                <NotificationPanel isOpen={showNotifications} onClose={() => setShowNotifications(false)} notifications={undismissedNotifications} onDismiss={handleDismissNotification} />
-                            </div>
                             <a href="/dashboard" className="flex items-center gap-2 px-3 py-1.5 text-sm font-semibold border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700"><LogOut size={16}/><span>Trang quản lý</span></a>
                         </div>
                    </div>
                    <div className="p-2 flex items-center gap-2 overflow-x-auto pb-2 flex-nowrap border-b border-slate-200 dark:border-slate-700 flex-shrink-0">{categories.map(category => (<button key={category} onClick={() => handleCategoryFilter(category)} className={`px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap ${activeCategory === category ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-700'}`}>{category === 'all' ? 'Tất cả' : category}</button>))}</div>
-                   <div className="flex-grow p-4 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
-    {dataLoading ? (
-        // Hiển thị 12 khung xương khi đang tải
-        Array.from({ length: 12 }).map((_, i) => <ProductSkeleton key={i} />)
-    ) : (
-        // Hiển thị sản phẩm thật khi đã tải xong
-        filteredProducts.map(product => (
-            <div key={product.id} onClick={product.stock > 0 ? () => handleAddToCart(product) : undefined} className={`relative bg-white dark:bg-slate-800 rounded-lg p-3 flex flex-col items-center text-center transform transition-all duration-200 shadow-md ${product.stock > 0 ? 'cursor-pointer hover:scale-105 hover:shadow-lg' : 'opacity-50 grayscale cursor-not-allowed'}`}>
-                {product.stock <= 0 && (<span className="absolute top-2 right-2 badge badge-destructive z-10">Hết hàng</span>)}
-                
-                {/* Component Image đã được tối ưu từ bước trước */}
-                <Image 
-                    src={product.imageUrl || 'https://placehold.co/80x80/e2e8f0/64748b?text=Ảnh'} 
-                    alt={product.name} 
-                    width={80} 
-                    height={80}
-                    className="w-20 h-20 object-cover rounded-md mb-2"
-                    unoptimized={true}
-                />
-
-                <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex-grow">{product.name}</div>
-                <div className="text-lg font-bold text-indigo-600 dark:text-indigo-400 mt-2">{formatCurrency(product.price)}</div>
-            </div>
-        ))
-    )}
-</div>
-
+                   <div className="flex-grow p-4 overflow-y-auto">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
+                            {dataLoading ? (
+                                Array.from({ length: 24 }).map((_, i) => <ProductSkeleton key={i} />)
+                            ) : (
+                                filteredProducts.map(product => (
+                                    <div key={product.id} onClick={product.stock > 0 ? () => handleAddToCart(product) : undefined} className={`relative bg-white dark:bg-slate-800 rounded-lg p-3 flex flex-col items-center text-center transform transition-all duration-200 shadow-md ${product.stock > 0 ? 'cursor-pointer hover:scale-105 hover:shadow-lg' : 'opacity-50 grayscale cursor-not-allowed'}`}>
+                                        {product.stock <= 0 && (<span className="absolute top-2 right-2 badge badge-destructive z-10">Hết hàng</span>)}
+                                        <Image src={product.imageUrl || 'https://placehold.co/80x80/e2e8f0/64748b?text=Ảnh'} alt={product.name} width={80} height={80} className="w-20 h-20 object-cover rounded-md mb-2"/>
+                                        <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex-grow">{product.name}</div>
+                                        <div className="text-lg font-bold text-indigo-600 dark:text-indigo-400 mt-2">{formatCurrency(product.price)}</div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                        {hasMore && !dataLoading && (
+                            <div className="mt-6 flex justify-center">
+                                <button onClick={fetchMoreProducts} disabled={loadingMore} className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg font-semibold hover:bg-slate-100 dark:hover:bg-slate-600 disabled:opacity-50">
+                                    {loadingMore ? <><Loader2 className="animate-spin" size={18}/> Đang tải...</> : 'Tải thêm sản phẩm'}
+                                </button>
+                            </div>
+                        )}
+                   </div>
                 </div>
+
                 <div className="w-[420px] flex-shrink-0 bg-white dark:bg-slate-800 flex flex-col h-screen">
                     <div className="p-4 border-b border-slate-200 dark:border-slate-700"><CustomerPanel customer={currentCustomer} onAction={(action) => action === 'open_modal' ? setShowCustomerModal(true) : setCurrentCustomer(null)} /></div>
                     <div className="p-4 border-b border-slate-200 dark:border-slate-700"><h3 className="font-bold mb-2 text-sm uppercase text-slate-500">Hóa đơn đang giữ</h3><div className="flex items-center gap-2 overflow-x-auto pb-2">{heldBills.length === 0 ? (<p className="text-xs text-slate-400">Chưa có hóa đơn.</p>) : (heldBills.map(bill => (<button key={bill.id} onClick={() => handleRestoreBill(bill.id)} className="p-2 rounded-lg bg-slate-200 dark:bg-slate-700 text-left w-40 flex-shrink-0"><p className="font-bold text-sm truncate">{bill.customer?.name || 'Khách lẻ'}</p><p className="text-xs text-indigo-500 font-semibold">{formatCurrency(bill.total)}</p><p className="text-xs text-slate-400">{new Date(bill.time).toLocaleTimeString('vi-VN')}</p></button>)))}</div></div>
@@ -587,25 +494,22 @@ useEffect(() => {
                         {currentCustomer && (<div className="space-y-2 py-2 border-t border-dashed dark:border-slate-700"><label className="font-semibold text-sm block">Sử dụng điểm ({currentCustomer.points || 0})</label><input type="text" value={pointsToUse} onChange={(e) => setPointsToUse(e.target.value.replace(/[^\d]/g, ''))} className="w-full bg-slate-100 dark:bg-slate-700 rounded-lg p-2 text-lg font-bold text-right" placeholder="0"/>{discountAmount > 0 && <div className="flex justify-between text-green-600"><span>Giảm giá:</span><span className="font-semibold">- {formatCurrency(discountAmount)}</span></div>}</div>)}
                         <div className="my-3 py-3 border-t border-b border-dashed dark:border-slate-600"><div className="flex justify-between items-center text-2xl font-bold"><span>Khách cần trả</span><span className="text-indigo-500">{formatCurrency(totalAfterDiscount)}</span></div></div>
                         <div className="space-y-2"><label htmlFor="cash-received" className="font-semibold">Tiền khách đưa</label><input type="text" id="cash-received" value={cashReceived} onChange={(e) => setCashReceived(new Intl.NumberFormat('vi-VN').format(parseCurrency(e.target.value)) || '')} className="w-full bg-slate-100 dark:bg-slate-700 rounded-lg p-3 text-2xl font-bold text-right" placeholder="0"/></div>
-                        <div className="grid grid-cols-4 gap-2 pt-2">{denominations.map(value => (<button key={value} onClick={() => handleDenominationClick(value)} className="text-sm font-semibold py-2 bg-slate-200 dark:bg-slate-700 rounded-md hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">{new Intl.NumberFormat('vi-VN').format(value)}</button>))}<button onClick={handleClearCashReceived} className="col-span-1 text-sm font-semibold py-2 bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300 rounded-md hover:bg-red-200 dark:hover:bg-red-900 transition-colors">Xóa</button></div>
+                        <div className="grid grid-cols-4 gap-2 pt-2">{[10000, 20000, 50000, 100000, 200000, 500000].map(value => (<button key={value} onClick={() => handleDenominationClick(value)} className="text-sm font-semibold py-2 bg-slate-200 dark:bg-slate-700 rounded-md hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">{new Intl.NumberFormat('vi-VN').format(value)}</button>))}<button onClick={handleClearCashReceived} className="col-span-2 text-sm font-semibold py-2 bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300 rounded-md hover:bg-red-200 dark:hover:bg-red-900 transition-colors">Xóa</button></div>
                         <div className="flex justify-between items-center text-xl font-bold text-green-600 dark:text-green-400"><span>Tiền thừa</span><span>{formatCurrency(changeAmount)}</span></div>
                     </div>
                     <div className="p-4 mt-auto bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-700">
-                        <div className="grid grid-cols-1 gap-3 mb-3"> {/* Đã sửa thành grid-cols-1 */}
-                            <button onClick={() => setActivePaymentMethod('cash')} className={`btn-payment ${activePaymentMethod === 'cash' ? 'active' : ''}`}><Wallet size={18}/>Tiền mặt</button>
-                            {/* Nút QR code đã bị xóa: <button onClick={() => setActivePaymentMethod('qr')} className={`btn-payment ${activePaymentMethod !== 'cash' ? 'active' : ''}`}><QrCode size={18}/>Quét mã QR</button> */}
-                        </div>
+                        <div className="grid grid-cols-1 gap-3 mb-3"><button onClick={() => setActivePaymentMethod('cash')} className={`btn-payment ${activePaymentMethod === 'cash' ? 'active' : ''}`}><Wallet size={18}/>Tiền mặt</button></div>
                         <div className="flex gap-3 mb-3"><button onClick={handleHoldBill} disabled={cart.length === 0} className="flex-1 btn-action-outline bg-amber-500/10 border-amber-500 text-amber-600 hover:bg-amber-500/20 disabled:opacity-50"><PauseCircle size={18}/>Giữ hóa đơn</button></div>
                         <button id="payment-button" onClick={initiateCheckout} disabled={cart.length === 0} className="w-full bg-indigo-600 text-white font-bold text-lg py-4 rounded-xl hover:bg-indigo-700 disabled:bg-slate-400"><div className="flex items-center justify-center gap-3"><CheckCircle size={20}/><span>THANH TOÁN (F9)</span></div></button>
                     </div>
                 </div>
             </main>
+            
             <Toast message={toast.message} show={toast.show} />
             <CalculatorModal show={showCalculator} onClose={() => setShowCalculator(false)} />
-            <ProductLookupModal show={showProductLookup} onClose={() => setShowProductLookup(false)} products={products || []} onProductSelect={handleAddToCart} />
-            <CustomerModal show={showCustomerModal} onClose={() => setShowCustomerModal(false)} customers={customers || []} onSelectCustomer={setCurrentCustomer} onAddNewCustomer={handleAddNewCustomer} />
+            <ProductLookupModal show={showProductLookup} onClose={() => setShowProductLookup(false)} products={allProducts} onProductSelect={handleAddToCart} />
+            <CustomerModal show={showCustomerModal} onClose={() => setShowCustomerModal(false)} customers={customers} onSelectCustomer={setCurrentCustomer} onAddNewCustomer={handleAddNewCustomer} />
             <ReceiptModal show={showReceiptModal} onClose={() => { setShowReceiptModal(false); setLastReceiptData(null); }} data={lastReceiptData} />
-            {/* Component QrPaymentModal đã bị xóa: <QrPaymentModal isOpen={isQrModalOpen} onClose={() => setIsQrModalOpen(false)} qrUrl={paymentLinkData?.qrCode} checkoutUrl={paymentLinkData?.checkoutUrl} amount={totalAfterDiscount} status={paymentStatus} /> */}
         </>
     );
 }

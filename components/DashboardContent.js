@@ -7,7 +7,7 @@ import { useAuthState } from 'react-firebase-hooks/auth';
 import { useRouter } from 'next/router';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { DollarSign, ShoppingCart, TrendingUp, Users, AlertTriangle, Tag, CreditCard, Calendar as CalendarIcon, BarChart } from 'lucide-react';
-
+import dynamic from 'next/dynamic'; 
 import { format } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import { DayPicker } from 'react-day-picker';

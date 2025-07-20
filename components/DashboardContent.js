@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Sidebar from './Sidebar';
-import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, query, onSnapshot, orderBy, where } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
 import { DollarSign, ShoppingCart, TrendingUp, Users, AlertTriangle, Tag, CreditCard, Calendar as CalendarIcon, BarChart } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, startOfDay, endOfDay, startOfWeek, startOfMonth, startOfYear } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import { DayPicker } from 'react-day-picker';
 import 'react-day-picker/dist/style.css';
@@ -31,7 +31,7 @@ const calculateStats = (bills) => {
     const avgValue = transactions > 0 ? revenue / transactions : 0;
     const profit = bills.reduce((sum, bill) => {
         const billProfit = (bill.items || []).reduce((itemSum, item) => {
-            const cost = item.lastImportPrice || item.price * 0.7; // Giả định lợi nhuận gộp nếu không có giá nhập
+            const cost = item.lastImportPrice || item.price * 0.7;
             return itemSum + ((item.price * item.quantity) - (cost * item.quantity));
         }, 0);
         return sum + billProfit;
@@ -61,47 +61,43 @@ export default function DashboardContent() {
     const [user, authLoading] = useAuthState(auth);
     const router = useRouter();
 
-    const [bills, setBills] = useState([]);
-    const [products, setProducts] = useState([]);
-    const [customers, setCustomers] = useState([]);
-    const [dataLoading, setDataLoading] = useState(true); 
+    const [allBills, setAllBills] = useState([]);
+    const [allProducts, setAllProducts] = useState([]);
+    const [allCustomers, setAllCustomers] = useState([]);
+    const [initialDataLoading, setInitialDataLoading] = useState(true); 
 
-    const defaultRange = { from: new Date(new Date().setHours(0, 0, 0, 0)), to: new Date(new Date().setHours(23, 59, 59, 999)) };
-    const [tempRange, setTempRange] = useState(defaultRange);
+    const defaultRange = { from: startOfDay(new Date()), to: endOfDay(new Date()) };
     const [activeRange, setActiveRange] = useState(defaultRange);
     const [activePreset, setActivePreset] = useState('today');
-
+    const [tempRange, setTempRange] = useState(defaultRange);
     const [isPickerOpen, setIsPickerOpen] = useState(false);
     const pickerRef = useRef(null);
     
+    useEffect(() => { if (!authLoading && !user) router.push('/login'); }, [user, authLoading, router]);
+
+    // TẢI DỮ LIỆU BAN ĐẦU (7 NGÀY GẦN NHẤT)
     useEffect(() => {
-        if (!authLoading && !user) {
-            router.push('/login');
-        }
-    }, [user, authLoading, router]);
+        if (!user) return;
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - 7);
+        startDate.setHours(0, 0, 0, 0);
 
+        const initialBillsQuery = query(collection(db, 'bills'), where('createdAt', '>=', startDate), orderBy('createdAt', 'desc'));
+        const unsubInitialBills = onSnapshot(initialBillsQuery, (snapshot) => {
+            setAllBills(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            setInitialDataLoading(false);
+        }, (error) => { console.error("Lỗi tải dữ liệu ban đầu:", error); setInitialDataLoading(false); });
+        
+        return () => unsubInitialBills();
+    }, [user]);
+
+    // TẢI CÁC DỮ LIỆU CÒN LẠI TRONG NỀN
     useEffect(() => {
-        const unsubscribers = [
-            onSnapshot(query(collection(db, 'bills'), orderBy('createdAt', 'desc')), (snapshot) => {
-                setBills(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-            }),
-            onSnapshot(query(collection(db, 'products'), orderBy('name', 'asc')), (snapshot) => {
-                setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-            }),
-            onSnapshot(query(collection(db, 'customers'), orderBy('name', 'asc')), (snapshot) => {
-                setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-            }),
-        ];
-
-        const initialLoadTimeout = setTimeout(() => {
-            setDataLoading(false);
-        }, 3000);
-
-        return () => {
-            unsubscribers.forEach(unsub => unsub());
-            clearTimeout(initialLoadTimeout);
-        };
-    }, []);
+        if (!user || initialDataLoading) return;
+        const unsubProducts = onSnapshot(query(collection(db, 'products'), orderBy('name', 'asc')), (snapshot) => setAllProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
+        const unsubCustomers = onSnapshot(query(collection(db, 'customers'), orderBy('name', 'asc')), (snapshot) => setAllCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
+        return () => { unsubProducts(); unsubCustomers(); };
+    }, [user, initialDataLoading]);
     
     useEffect(() => {
         function handleClickOutside(event) { if (pickerRef.current && !pickerRef.current.contains(event.target)) setIsPickerOpen(false); }
@@ -109,106 +105,77 @@ export default function DashboardContent() {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, [pickerRef]);
 
-const memoizedData = useMemo(() => {
-    if (dataLoading) return null;
-    
-    const { from, to } = activeRange;
-    const toDateWithTime = to ? new Date(new Date(to).setHours(23, 59, 59, 999)) : new Date(new Date(from).setHours(23, 59, 59, 999));
-    
-    const filteredBills = bills.filter(b => {
-        const billDate = b.createdAt?.toDate();
-        return billDate && billDate >= from && billDate <= toDateWithTime;
-    });
+    const memoizedData = useMemo(() => {
+        const { from, to } = activeRange;
+        const toDateWithTime = to ? new Date(new Date(to).setHours(23, 59, 59, 999)) : new Date(new Date(from).setHours(23, 59, 59, 999));
+        
+        const filteredBills = allBills.filter(b => {
+            const billDate = b.createdAt?.toDate();
+            return billDate && billDate >= from && billDate <= toDateWithTime;
+        });
 
-    const currentStats = calculateStats(filteredBills);
+        const currentStats = calculateStats(filteredBills);
 
-    const dailySalesMap = {};
-    filteredBills.forEach(bill => {
-        const billDate = bill.createdAt?.toDate();
-        if (billDate) {
-            const dateKey = format(billDate, 'dd/MM', { locale: vi });
-            dailySalesMap[dateKey] = (dailySalesMap[dateKey] || 0) + (bill.totalAfterDiscount || 0);
-        }
-    });
-    const chartData = Object.keys(dailySalesMap)
-        .sort((a, b) => {
+        const dailySalesMap = {};
+        filteredBills.forEach(bill => {
+            const billDate = bill.createdAt?.toDate();
+            if (billDate) {
+                const dateKey = format(billDate, 'dd/MM', { locale: vi });
+                dailySalesMap[dateKey] = (dailySalesMap[dateKey] || 0) + (bill.totalAfterDiscount || 0);
+            }
+        });
+        const chartData = Object.keys(dailySalesMap).sort((a, b) => {
             const [dayA, monthA] = a.split('/');
             const [dayB, monthB] = b.split('/');
             return (new Date(new Date().getFullYear(), monthA - 1, dayA)).getTime() - (new Date(new Date().getFullYear(), monthB - 1, dayB)).getTime();
-        })
-        .map(date => ({ date, DoanhThu: dailySalesMap[date] }));
+        }).map(date => ({ date, DoanhThu: dailySalesMap[date] }));
 
-    const productSales = {};
-    filteredBills.forEach(bill => {
-        (bill.items || []).forEach(item => {
+        const productSales = {};
+        filteredBills.forEach(bill => (bill.items || []).forEach(item => { 
             productSales[item.id] = productSales[item.id] || { name: item.name, totalQuantity: 0, totalRevenue: 0 };
             productSales[item.id].totalQuantity += item.quantity;
             productSales[item.id].totalRevenue += item.quantity * (item.price || 0);
+        }));
+        const topSellingProducts = Object.values(productSales).sort((a, b) => b.totalQuantity - a.totalQuantity).slice(0, 5);
+
+        const customerSpending = {};
+        filteredBills.forEach(bill => {
+            if (bill.customer?.id) {
+                customerSpending[bill.customer.id] = customerSpending[bill.customer.id] || { id: bill.customer.id, name: bill.customer.name, totalSpent: 0 };
+                customerSpending[bill.customer.id].totalSpent += bill.totalAfterDiscount || 0;
+            }
         });
-    });
-    const topSellingProducts = Object.values(productSales).sort((a, b) => b.totalQuantity - a.totalQuantity).slice(0, 5);
+        const topCustomers = Object.values(customerSpending).map(data => {
+            const customerInfo = allCustomers.find(c => c.id === data.id);
+            return { ...data, name: customerInfo?.name || data.name, points: customerInfo?.points || 0 };
+        }).sort((a, b) => b.totalSpent - a.totalSpent).slice(0, 5);
 
-    const customerSpending = {};
-    filteredBills.forEach(bill => {
-        if (bill.customer?.id) {
-            // Đảm bảo có customer.id để tổng hợp
-            customerSpending[bill.customer.id] = customerSpending[bill.customer.id] || { id: bill.customer.id, name: bill.customer.name, totalSpent: 0 };
-            customerSpending[bill.customer.id].totalSpent += bill.totalAfterDiscount || 0;
-        }
-    });
-    
-    const topCustomers = Object.values(customerSpending).map(data => {
-        const customerInfo = customers.find(c => c.id === data.id);
-        return {
-            ...data,
-            // Lấy tên từ bản ghi khách hàng nếu có, nếu không thì dùng tên từ hóa đơn
-            name: customerInfo?.name || data.name, 
-            points: customerInfo?.points || 0
-        };
-    }).sort((a, b) => b.totalSpent - a.totalSpent).slice(0, 5);
+        const lowStockItems = allProducts.filter(p => p.stock !== undefined && p.stock < 10 && p.isActive !== false).slice(0, 5);
 
-    const lowStockItems = products.filter(p => p.stock !== undefined && p.stock < 10 && p.isActive !== false).slice(0, 5);
+        return { currentStats, topSellingProducts, lowStockItems, topCustomers, chartData };
+    }, [allBills, allProducts, allCustomers, activeRange]);
 
-    return { currentStats, topSellingProducts, lowStockItems, topCustomers, chartData };
-}, [bills, products, customers, activeRange, dataLoading]);
-
-    if (authLoading || dataLoading || !memoizedData) {
-        return (
-            <div className="flex items-center justify-center h-screen bg-slate-100 dark:bg-slate-900">
-                <p className="text-lg font-semibold">Đang tải dữ liệu...</p>
-            </div>
-        );
+    if (authLoading || initialDataLoading) {
+        return <div className="flex items-center justify-center h-screen bg-slate-100 dark:bg-slate-900"><p>Đang tải dữ liệu...</p></div>;
     }
-
-    if (!user) {
-        return null;
-    }
+    if (!user) return null;
 
     const handleFilter = () => {
         setActiveRange(tempRange);
         setActivePreset('custom');
         setIsPickerOpen(false);
-    }
-
+    };
+    
     const handlePresetFilter = (preset) => {
         const now = new Date();
-        let fromDate = new Date();
-        let toDate = new Date();
-
-        if (preset === 'today') {
-            fromDate.setHours(0, 0, 0, 0);
-            toDate.setHours(23, 59, 59, 999);
-        } else if (preset === 'thisWeek') {
-            const dayOfWeek = now.getDay() === 0 ? 6 : now.getDay() - 1;
-            fromDate.setDate(now.getDate() - dayOfWeek);
-            fromDate.setHours(0, 0, 0, 0);
-        } else if (preset === 'thisMonth') {
-            fromDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        } else if (preset === 'thisYear') {
-            fromDate = new Date(now.getFullYear(), 0, 1);
-        }
+        let fromDate;
+        if (preset === 'today') fromDate = startOfDay(now);
+        else if (preset === 'thisWeek') fromDate = startOfWeek(now, { weekStartsOn: 1 });
+        else if (preset === 'thisMonth') fromDate = startOfMonth(now);
+        else if (preset === 'thisYear') fromDate = startOfYear(now);
+        else fromDate = startOfDay(now);
         
-        const newRange = { from: fromDate, to: toDate };
+        const newRange = { from: fromDate, to: endOfDay(now) };
         setActiveRange(newRange);
         setTempRange(newRange);
         setActivePreset(preset);
@@ -236,8 +203,8 @@ const memoizedData = useMemo(() => {
                                 <div className="absolute top-full right-0 mt-2 z-20 bg-white dark:bg-slate-800 rounded-xl shadow-lg border dark:border-slate-700 p-4">
                                     <DayPicker mode="range" selected={tempRange} onSelect={setTempRange} locale={vi} showOutsideDays fixedWeeks />
                                     <div className="flex justify-end gap-2 border-t dark:border-slate-700 pt-4 mt-2">
-                                        <button onClick={() => setIsPickerOpen(false)} className="btn-action-outline">Hủy</button>
-                                        <button onClick={handleFilter} className="btn-action bg-indigo-600 text-white">Lọc</button>
+                                        <button onClick={() => setIsPickerOpen(false)} className="btn-secondary">Hủy</button>
+                                        <button onClick={handleFilter} className="btn-primary">Lọc</button>
                                     </div>
                                 </div>
                             )}
@@ -256,7 +223,7 @@ const memoizedData = useMemo(() => {
                     <StatCard title="Lợi nhuận (tạm tính)" value={formatCurrency(memoizedData.currentStats.profit)} icon={<TrendingUp size={24} className="text-amber-500"/>} iconBgColor="bg-amber-100 dark:bg-amber-900/50" />
                 </section>
 
-                <section className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md mb-8">
+                <section className="card mb-8">
                     <SectionTitle title="Biểu đồ Doanh thu (Theo Ngày)" icon={<BarChart size={20} />} />
                     <div className="h-72">
                         <DynamicResponsiveContainer width="100%" height="100%">
@@ -273,19 +240,19 @@ const memoizedData = useMemo(() => {
                 </section>
                 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                    <section className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md">
+                    <section className="card">
                         <SectionTitle title="Sản phẩm bán chạy nhất" icon={<Tag size={20} />} />
-                        <div className="overflow-x-auto"><table className="min-w-full text-sm text-left"><thead className="bg-slate-50 dark:bg-slate-700/50 text-xs uppercase"><tr><th className="px-4 py-2">Tên SP</th><th className="px-4 py-2 text-center">SL bán</th><th className="px-4 py-2 text-right">Doanh thu</th></tr></thead><tbody className="divide-y divide-slate-200 dark:divide-slate-700">{memoizedData.topSellingProducts.length > 0 ? (memoizedData.topSellingProducts.map((p, i) => (<tr key={i}><td className="px-4 py-3 font-medium">{p.name}</td><td className="px-4 py-3 text-center">{p.totalQuantity}</td><td className="px-4 py-3 text-right">{formatCurrency(p.totalRevenue)}</td></tr>))) : (<tr><td colSpan="3" className="text-center py-4 text-slate-400">Không có dữ liệu.</td></tr>)}</tbody></table></div>
+                        <div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="table-header"><tr><th className="px-4 py-2">Tên SP</th><th className="px-4 py-2 text-center">SL bán</th><th className="px-4 py-2 text-right">Doanh thu</th></tr></thead><tbody className="divide-y divide-slate-200 dark:divide-slate-700">{memoizedData.topSellingProducts.length > 0 ? (memoizedData.topSellingProducts.map((p, i) => (<tr key={i}><td className="px-4 py-3 font-medium">{p.name}</td><td className="px-4 py-3 text-center">{p.totalQuantity}</td><td className="px-4 py-3 text-right">{formatCurrency(p.totalRevenue)}</td></tr>))) : (<tr><td colSpan="3" className="text-center py-4 text-slate-400">Không có dữ liệu.</td></tr>)}</tbody></table></div>
                     </section>
-                    <section className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md">
+                    <section className="card">
                         <SectionTitle title="Sản phẩm sắp hết hàng" icon={<AlertTriangle size={20} className="text-orange-500" />} />
-                        <div className="overflow-x-auto"><table className="min-w-full text-sm text-left"><thead className="bg-slate-50 dark:bg-slate-700/50 text-xs uppercase"><tr><th className="px-4 py-2">Tên SP</th><th className="px-4 py-2 text-center">Tồn kho</th></tr></thead><tbody className="divide-y divide-slate-200 dark:divide-slate-700">{memoizedData.lowStockItems.length > 0 ? (memoizedData.lowStockItems.map(item => (<tr key={item.id}><td className="px-4 py-3 font-medium">{item.name}</td><td className="px-4 py-3 text-center text-orange-500 font-bold">{item.stock}</td></tr>))) : (<tr><td colSpan="2" className="text-center py-4 text-slate-400">Không có sản phẩm nào.</td></tr>)}</tbody></table></div>
+                        <div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="table-header"><tr><th className="px-4 py-2">Tên SP</th><th className="px-4 py-2 text-center">Tồn kho</th></tr></thead><tbody className="divide-y divide-slate-200 dark:divide-slate-700">{memoizedData.lowStockItems.length > 0 ? (memoizedData.lowStockItems.map(item => (<tr key={item.id}><td className="px-4 py-3 font-medium">{item.name}</td><td className="px-4 py-3 text-center text-orange-500 font-bold">{item.stock}</td></tr>))) : (<tr><td colSpan="2" className="text-center py-4 text-slate-400">Không có sản phẩm nào.</td></tr>)}</tbody></table></div>
                     </section>
                 </div>
                 
-                <section className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md mb-8">
+                <section className="card">
                     <SectionTitle title="Khách hàng thân thiết hàng đầu" icon={<Users size={20} />} />
-                    <div className="overflow-x-auto"><table className="min-w-full text-sm text-left"><thead className="text-xs uppercase bg-slate-50 dark:bg-slate-700/50"><tr><th className="px-4 py-2">Tên KH</th><th className="px-4 py-2 text-center">Điểm</th><th className="px-4 py-2 text-right">Tổng chi tiêu</th></tr></thead><tbody className="divide-y divide-slate-200 dark:divide-slate-700">{memoizedData.topCustomers.length > 0 ? (memoizedData.topCustomers.map(customer => (<tr key={customer.id}><td className="px-4 py-3 font-medium">{customer.name}</td><td className="px-4 py-3 text-center">{customer.points}</td><td className="px-4 py-3 text-right">{formatCurrency(customer.totalSpent)}</td></tr>))) : (<tr><td colSpan="3" className="text-center py-4 text-slate-400">Không có dữ liệu.</td></tr>)}</tbody></table></div>
+                    <div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="table-header"><tr><th className="px-4 py-2">Tên KH</th><th className="px-4 py-2 text-center">Điểm</th><th className="px-4 py-2 text-right">Tổng chi tiêu</th></tr></thead><tbody className="divide-y divide-slate-200 dark:divide-slate-700">{memoizedData.topCustomers.length > 0 ? (memoizedData.topCustomers.map(customer => (<tr key={customer.id}><td className="px-4 py-3 font-medium">{customer.name}</td><td className="px-4 py-3 text-center">{customer.points}</td><td className="px-4 py-3 text-right">{formatCurrency(customer.totalSpent)}</td></tr>))) : (<tr><td colSpan="3" className="text-center py-4 text-slate-400">Không có dữ liệu.</td></tr>)}</tbody></table></div>
                 </section>
             </main>
         </div>

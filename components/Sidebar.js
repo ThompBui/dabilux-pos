@@ -50,18 +50,16 @@ const NavLink = ({ href, icon, label }) => {
     const router = useRouter();
     const isActive = router.pathname === href;
 
-    // BƯỚC 2: Bọc thẻ <a> trong component <Link>
     return (
-        <Link href={href} passHref>
-            <a
-                className={`flex items-center gap-3 p-3 rounded-lg transition-colors ${
-                    isActive 
-                    ? 'bg-indigo-600 text-white font-semibold shadow-md' 
-                    : 'hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
-                }`}
-            >
-                {icon} {label}
-            </a>
+        <Link
+            href={href}
+            className={`flex items-center gap-3 p-3 rounded-lg transition-colors ${
+                isActive 
+                ? 'bg-indigo-600 text-white font-semibold shadow-md' 
+                : 'hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
+            }`}
+        >
+            {icon} {label}
         </Link>
     );
 };

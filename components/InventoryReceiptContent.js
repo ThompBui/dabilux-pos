@@ -76,43 +76,36 @@ export default function InventoryReceiptContent() { // Đã đổi tên hàm
 
     // Logic xác thực
     useEffect(() => {
-        if (!authLoading) {
-            if (!user) {
-                if (router.pathname !== '/login') {
-                    console.log("AUTH: Chuyển hướng đến /login");
-                    router.push('/login');
-                }
-            } else {
-                console.log("AUTH: Người dùng đã đăng nhập:", user.email);
-            }
-        } else {
-            console.log("AUTH: Đang tải trạng thái xác thực...");
-        }
-    }, [user, authLoading, router]);
+    // Nếu quá trình xác thực đã xong và không có người dùng
+    if (!authLoading && !user) {
+        // Chuyển hướng về trang đăng nhập
+        router.push('/login');
+    }
+}, [user, authLoading, router]);
 
     // Lắng nghe dữ liệu
     useEffect(() => {
-        console.log("DATA: Bắt đầu lắng nghe Inventory data...");
-        const unsubscribers = [
-            onSnapshot(query(collection(db, 'categories'), orderBy('name')), (s) => {
-                setCategories(s.docs.map(d => ({ id: d.id, ...d.data() })));
-                console.log("DATA: Categories tải:", s.docs.length);
-            }),
-            onSnapshot(query(collection(db, 'units'), orderBy('name')), (s) => {
-                setUnits(s.docs.map(d => ({ id: d.id, ...d.data() })));
-                console.log("DATA: Units tải:", s.docs.length);
-            }),
-            onSnapshot(query(collection(db, 'stockReceipts'), orderBy('createdAt', 'desc')), (s) => {
-                setPastReceipts(s.docs.map(d => ({ id: d.id, ...d.data() })));
-                console.log("DATA: StockReceipts tải:", s.docs.length);
-            })
-        ];
-        const timer = setTimeout(() => {
-            setLoadingData(false); // Đổi tên từ setLoadingData
-            console.log("DATA: dataLoading Inventory chuyển FALSE.");
-        }, 2000); // 2 giây để tải dữ liệu ban đầu
-        return () => { unsubscribers.forEach(unsub => unsub()); clearTimeout(timer); };
-    }, []);
+    const unsubscribers = [
+        onSnapshot(query(collection(db, 'categories'), orderBy('name')), (s) => {
+            setCategories(s.docs.map(d => ({ id: d.id, ...d.data() })));
+        }),
+        onSnapshot(query(collection(db, 'units'), orderBy('name')), (s) => {
+            setUnits(s.docs.map(d => ({ id: d.id, ...d.data() })));
+        }),
+        onSnapshot(query(collection(db, 'stockReceipts'), orderBy('createdAt', 'desc')), (s) => {
+            setPastReceipts(s.docs.map(d => ({ id: d.id, ...d.data() })));
+        })
+    ];
+
+    const timer = setTimeout(() => {
+        setLoadingData(false);
+    }, 2000);
+
+    return () => {
+        unsubscribers.forEach(unsub => unsub());
+        clearTimeout(timer);
+    };
+}, []);
 
     const showToast = (message) => {
         setToast({ show: true, message });
@@ -199,18 +192,16 @@ export default function InventoryReceiptContent() { // Đã đổi tên hàm
 
     // HIỂN THỊ MÀN HÌNH TẢI HOẶC NULL KHI CHƯA SẴN SÀNG
     if (authLoading || dataLoading) {
-        console.log("RENDER: Hiển thị màn hình tải Inventory. authLoading:", authLoading, "dataLoading:", dataLoading);
-        return (
-            <div className="flex items-center justify-center h-screen bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200">
-                <p className="text-lg font-semibold">Đang tải...</p>
-            </div>
-        );
-    }
+    return (
+        <div className="flex items-center justify-center h-screen bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200">
+            <p className="text-lg font-semibold">Đang tải...</p>
+        </div>
+    );
+}
 
-    if (!user) { // Sau khi authLoading đã false và dataLoading đã false
-        console.log("RENDER: Không có người dùng, trả về null.");
-        return null;
-    }
+if (!user) {
+    return null;
+}
 
     return (
         <div className="flex min-h-screen bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200">

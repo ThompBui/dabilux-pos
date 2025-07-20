@@ -1,13 +1,12 @@
-// components/Sidebar.js
-import React, { useState } from 'react'; // Thêm useState
+import React, { useState } from 'react';
+import Link from 'next/link'; // BƯỚC 1: Import Link
 import { useRouter } from 'next/router';
 import { auth } from '../firebase';
 import {
     Home, BarChart2, Settings, Users, ShoppingBag, FileText, LogOut, Box, ShoppingCart,
-    Headset, X // Thêm Headset và X
+    Headset, X
 } from 'lucide-react';
 
-// --- THÊM MỚI: Component cho popup Hỗ trợ ---
 const SupportModal = ({ isOpen, onClose }) => {
     if (!isOpen) return null;
 
@@ -30,11 +29,8 @@ const SupportModal = ({ isOpen, onClose }) => {
                     </p>
                     <div className="text-left bg-slate-50 dark:bg-slate-700/50 p-4 rounded-lg w-full">
                         <p className="font-semibold">Đơn vị phát triển:</p>
-                        {/* LƯU Ý: Thay đổi thông tin của bạn ở đây */}
                         <p className="text-lg text-indigo-600 dark:text-indigo-400 font-bold mb-2">Bùi Anh</p>
-                        
                         <p className="font-semibold">SĐT (Zalo) Hỗ trợ:</p>
-                        {/* LƯU Ý: Thay đổi thông tin của bạn ở đây */}
                         <a href="tel:0374686626" className="text-lg text-indigo-600 dark:text-indigo-400 font-bold hover:underline">0374.686.626</a>
                     </div>
                     <button 
@@ -54,31 +50,35 @@ const NavLink = ({ href, icon, label }) => {
     const router = useRouter();
     const isActive = router.pathname === href;
 
+    // BƯỚC 2: Bọc thẻ <a> trong component <Link>
     return (
-        <a
-            href={href}
-            className={`flex items-center gap-3 p-3 rounded-lg transition-colors ${
-                isActive 
-                ? 'bg-indigo-600 text-white font-semibold shadow-md' 
-                : 'hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
-            }`}
-        >
-            {icon} {label}
-        </a>
+        <Link href={href} passHref>
+            <a
+                className={`flex items-center gap-3 p-3 rounded-lg transition-colors ${
+                    isActive 
+                    ? 'bg-indigo-600 text-white font-semibold shadow-md' 
+                    : 'hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
+                }`}
+            >
+                {icon} {label}
+            </a>
+        </Link>
     );
 };
 
 export default function Sidebar() {
-    const [isSupportModalOpen, setIsSupportModalOpen] = useState(false); // THÊM MỚI: State để quản lý popup
+    const [isSupportModalOpen, setIsSupportModalOpen] = useState(false);
     
     const handleLogout = async () => {
         try {
             await auth.signOut();
-            console.log("Đã đăng xuất thành công.");
+            router.push('/login'); // Chuyển hướng về trang login sau khi đăng xuất
         } catch (error) {
             console.error("Lỗi khi đăng xuất:", error);
         }
     };
+
+    const router = useRouter(); // Lấy router để dùng trong handleLogout
 
     return (
         <>
@@ -87,7 +87,6 @@ export default function Sidebar() {
                     BuiAnh POS
                 </div>
                 <nav className="space-y-3 flex-grow">
-                    
                     <NavLink href="/dashboard" icon={<Home size={20} />} label="Tổng quan" />
                     <NavLink href="/inventory-receipt" icon={<Box size={20} />} label="Nhập kho" />
                     <NavLink href="/product-management" icon={<ShoppingBag size={20} />} label="Quản lý sản phẩm" />
@@ -95,10 +94,9 @@ export default function Sidebar() {
                     <NavLink href="/transaction-history" icon={<FileText size={20} />} label="Lịch sử giao dịch" />
                     <NavLink href="/analytics" icon={<BarChart2 size={20} />} label="Phân tích" />
                     <NavLink href="/settings" icon={<Settings size={20} />} label="Cài đặt" />
-                    <NavLink href="/" icon={<ShoppingCart size={20} />} label="Bán hàng" className="bg-red-500 text-white" />
+                    <NavLink href="/" icon={<ShoppingCart size={20} />} label="Bán hàng" />
                 </nav>
                 <div className="mt-auto border-t border-slate-200 dark:border-slate-700 pt-3 space-y-2">
-                    {/* THÊM MỚI: Nút Hỗ trợ */}
                     <button 
                         onClick={() => setIsSupportModalOpen(true)}
                         className="flex items-center gap-3 p-3 rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 w-full text-left transition-colors"
@@ -113,8 +111,7 @@ export default function Sidebar() {
                     </button>
                 </div>
             </aside>
-            
-            {/* THÊM MỚI: Render popup Hỗ trợ */}
+             
             <SupportModal isOpen={isSupportModalOpen} onClose={() => setIsSupportModalOpen(false)} />
         </>
     );

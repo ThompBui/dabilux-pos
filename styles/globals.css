@@ -11,9 +11,8 @@
     font-family: 'Inter', sans-serif;
   }
 }
-/* Dán vào cuối file styles/globals.css */
 
-/* Lớp phủ mờ phía sau popup */
+/* Các lớp CSS tùy chỉnh cho hiệu ứng popup */
 .popup-overlay {
     position: fixed;
     top: 0;
@@ -30,13 +29,11 @@
     transition: opacity 0.3s ease, visibility 0.3s ease;
 }
 
-/* Hiển thị popup khi có class 'active' */
 .popup-overlay.active {
     opacity: 1;
     visibility: visible;
 }
 
-/* Khung chứa nội dung popup */
 .popup-container {
     background-color: #ffffff;
     border-radius: 1.5rem;
@@ -48,46 +45,12 @@
     transition: transform 0.3s ease, opacity 0.3s ease;
 }
 
-/* Hiệu ứng trượt lên khi popup active */
 .popup-overlay.active .popup-container {
     transform: translateY(0);
     opacity: 1;
 }
 
-@layer components {
-  /* Lớp badge đã được sửa lỗi (bỏ các thuộc tính focus) */
-  .badge {
-    @apply inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors;
-  }
-  .badge-destructive {
-    @apply badge border-transparent bg-red-500 text-white dark:bg-red-700 dark:text-red-100;
-  }
-
-  /* CÁC LỚP CŨ CỦA BẠN ĐƯỢC GIỮ NGUYÊN */
-  .btn-action {
-    @apply inline-flex items-center gap-2 px-3 py-2 bg-slate-100 text-slate-700 rounded-lg font-semibold transition-colors dark:bg-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600;
-  }
-  .btn-action-outline {
-    @apply inline-flex items-center gap-2 px-3 py-2 bg-transparent border border-slate-300 dark:border-slate-600 rounded-lg font-semibold transition-colors hover:bg-slate-100 dark:hover:bg-slate-700;
-  }
-  .btn-payment {
-    @apply flex items-center justify-center gap-2 p-3 bg-slate-100 dark:bg-slate-700 rounded-xl font-semibold transition-colors hover:bg-slate-200 dark:hover:bg-slate-600;
-  }
-  .btn-payment.active {
-    @apply bg-indigo-100 text-indigo-600 ring-2 ring-indigo-500 dark:bg-indigo-900/50 dark:text-indigo-300;
-  }
-
-  .th-custom { 
-    @apply px-4 py-3; 
-  }
-  .td-custom { 
-    @apply px-4 py-3 border-b border-slate-200 dark:border-slate-700;
-  }
-  .quantity-input {
-    @apply w-16 text-center font-semibold bg-slate-100 dark:bg-slate-700 rounded-md p-1 border border-slate-300 dark:border-slate-600;
-  }
-}
-
+/* Gộp tất cả các lớp component vào một khối duy nhất */
 @layer components {
     /* Lớp cho các khung card chính */
     .card {
@@ -103,11 +66,31 @@
     .input-field {
         @apply w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200;
     }
-    
-    /* Các loại nút bấm */
-    .btn-primary {
-        @apply px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition-colors disabled:bg-slate-400;
+
+    /* Lớp badge */
+    .badge {
+      @apply inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors;
     }
+    .badge-destructive {
+      @apply badge border-transparent bg-red-500 text-white dark:bg-red-700 dark:text-red-100;
+    }
+
+    /* Các loại nút bấm */
+    .btn-action {
+      @apply inline-flex items-center gap-2 px-3 py-2 bg-slate-100 text-slate-700 rounded-lg font-semibold transition-colors dark:bg-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600;
+    }
+    .btn-action-outline {
+      @apply inline-flex items-center gap-2 px-3 py-2 bg-transparent border border-slate-300 dark:border-slate-600 rounded-lg font-semibold transition-colors hover:bg-slate-100 dark:hover:bg-slate-700;
+    }
+    .btn-payment {
+      @apply flex items-center justify-center gap-2 p-3 bg-slate-100 dark:bg-slate-700 rounded-xl font-semibold transition-colors hover:bg-slate-200 dark:hover:bg-slate-600;
+    }
+    .btn-payment.active {
+      @apply bg-indigo-100 text-indigo-600 ring-2 ring-indigo-500 dark:bg-indigo-900/50 dark:text-indigo-300;
+    }
+    .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition-colors disabled:bg-slate-400;
+}
     .btn-primary-sm {
         @apply inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700;
     }
@@ -127,10 +110,21 @@
     }
 
     /* Lớp cho bảng */
+    .th-custom { 
+      @apply px-4 py-3; 
+    }
+    .td-custom { 
+      @apply px-4 py-3 border-b border-slate-200 dark:border-slate-700;
+    }
     .table-header {
         @apply text-xs text-slate-500 dark:text-slate-400 uppercase bg-slate-50 dark:bg-slate-700/50;
     }
     .table-row {
         @apply border-b dark:border-slate-700 last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors;
+    }
+    
+    /* Input số lượng */
+    .quantity-input {
+      @apply w-16 text-center font-semibold bg-slate-100 dark:bg-slate-700 rounded-md p-1 border border-slate-300 dark:border-slate-600;
     }
 }

@@ -106,24 +106,21 @@ const Toast = ({ message, show }) => (
     </div>
 );
 
-// --- COMPONENT CHÍNH ---
+
 export default function PosSystemContent() {
     const [user, authLoading] = useAuthState(auth);
     const router = useRouter();
     
-    // State cho dữ liệu
     const [allProducts, setAllProducts] = useState([]);
-    const [filteredProducts, setFilteredProducts] = useState([]);
+    const [filteredProducts, setFilteredProducts] = useState([]); // Quay lại dùng useState
     const [customers, setCustomers] = useState([]);
     const [storeInfo, setStoreInfo] = useState({ name: 'BuiAnh POS', logoUrl: '' });
     
-    // State cho việc tải dữ liệu và phân trang
     const [dataLoading, setDataLoading] = useState(true);
     const [lastVisible, setLastVisible] = useState(null);
     const [loadingMore, setLoadingMore] = useState(false);
     const [hasMore, setHasMore] = useState(true);
 
-    // State cho giao diện và giỏ hàng
     const [theme, setTheme] = useState('light');
     const [currentTime, setCurrentTime] = useState(new Date());
     const [cart, setCart] = usePersistentState('pos-cart', []);
@@ -134,7 +131,6 @@ export default function PosSystemContent() {
     const [pointsToUse, setPointsToUse] = useState('');
     const [activeCategory, setActiveCategory] = useState('all');
     
-    // State cho modals và thông báo
     const [showCustomerModal, setShowCustomerModal] = useState(false);
     const [showCalculator, setShowCalculator] = useState(false);
     const [showProductLookup, setShowProductLookup] = useState(false);
@@ -164,12 +160,7 @@ export default function PosSystemContent() {
         const fetchInitialProducts = async () => {
             setDataLoading(true);
             const productsRef = collection(db, 'products');
-            const q = query(
-                productsRef,
-                where('isActive', '!=', false),
-                orderBy('name', 'asc'),
-                limit(24)
-            );
+            const q = query(productsRef, where('isActive', '!=', false), orderBy('name', 'asc'), limit(24));
 
             const documentSnapshots = await getDocs(q);
             const productsData = documentSnapshots.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -177,11 +168,9 @@ export default function PosSystemContent() {
 
             setLastVisible(lastDoc);
             setAllProducts(productsData);
-            setFilteredProducts(productsData);
-
-            if (documentSnapshots.docs.length < 24) {
-                setHasMore(false);
-            }
+            setFilteredProducts(productsData); // Cập nhật trực tiếp ở đây
+            
+            if (documentSnapshots.docs.length < 24) setHasMore(false);
             setDataLoading(false);
         };
 
@@ -199,82 +188,45 @@ export default function PosSystemContent() {
         setLoadingMore(true);
 
         const productsRef = collection(db, 'products');
-        const q = query(
-            productsRef,
-            where('isActive', '!=', false),
-            orderBy('name', 'asc'),
-            startAfter(lastVisible),
-            limit(24)
-        );
-
+        const q = query(productsRef, where('isActive', '!=', false), orderBy('name', 'asc'), startAfter(lastVisible), limit(24));
+        
         const documentSnapshots = await getDocs(q);
         const newProductsData = documentSnapshots.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         const lastDoc = documentSnapshots.docs[documentSnapshots.docs.length - 1];
 
         setLastVisible(lastDoc);
-        const updatedProducts = [...allProducts, ...newProductsData];
-        setAllProducts(updatedProducts);
-        
-        if (activeCategory === 'all') {
-            setFilteredProducts(updatedProducts);
-        } else {
-            setFilteredProducts(updatedProducts.filter(p => p.category === activeCategory));
-        }
+        setAllProducts(prev => [...prev, ...newProductsData]);
 
-        if (documentSnapshots.docs.length < 24) {
-            setHasMore(false);
-        }
+        if (documentSnapshots.docs.length < 24) setHasMore(false);
         setLoadingMore(false);
     };
 
-    // Các useEffect khác
-    useEffect(() => { if (!authLoading && !user) router.push('/login'); }, [user, authLoading, router]);
-    
+    // useEffect để lọc sản phẩm
     useEffect(() => {
-        const root = window.document.documentElement;
-        const savedTheme = localStorage.getItem('theme') || 'light';
-        setTheme(savedTheme);
-        root.classList.toggle('dark', savedTheme === 'dark');
-    }, []);
-
-    useEffect(() => {
-        const root = window.document.documentElement;
-        root.classList.toggle('dark', theme === 'dark');
-        localStorage.setItem('theme', theme);
-    }, [theme]);
-    
-    useEffect(() => {
-        const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-        return () => clearInterval(timer);
-    }, []);
-    
-    useEffect(() => { setPointsToUse(''); }, [currentCustomer]);
-
-    useEffect(() => {
-        if (dataLoading) return;
         if (activeCategory === 'all') {
             setFilteredProducts(allProducts);
         } else {
             setFilteredProducts(allProducts.filter(p => p.category === activeCategory));
         }
-    }, [activeCategory, allProducts, dataLoading]);
+    }, [activeCategory, allProducts]);
     
+    useEffect(() => { if (!authLoading && !user) router.push('/login'); }, [user, authLoading, router]);
+    useEffect(() => { const timer = setInterval(() => setCurrentTime(new Date()), 1000); return () => clearInterval(timer); }, []);
+    useEffect(() => { setPointsToUse(''); }, [currentCustomer]);
+
+    // Các hàm và useMemo khác giữ nguyên ...
     const categories = useMemo(() => ['all', ...new Set(allProducts.map(p => p.category).filter(Boolean))], [allProducts]);
-    
     const { subtotal, tax, total } = useMemo(() => {
         const sub = cart.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 0), 0);
         return { subtotal: sub, tax: sub * 0.1, total: sub * 1.1 };
     }, [cart]);
-
     const discountAmount = useMemo(() => {
         const requestedPoints = parseCurrency(pointsToUse);
         if (!currentCustomer || requestedPoints <= 0) return 0;
         const actualPointsUsed = Math.min(requestedPoints, currentCustomer.points || 0);
         return Math.min(actualPointsUsed * 1000, total);
     }, [pointsToUse, currentCustomer, total]);
-
     const totalAfterDiscount = useMemo(() => total - discountAmount, [total, discountAmount]);
-
     const changeAmount = useMemo(() => {
         const received = parseCurrency(cashReceived);
         return received > totalAfterDiscount ? received - totalAfterDiscount : 0;
@@ -287,7 +239,6 @@ export default function PosSystemContent() {
         setPointsToUse('');
     }, [setCart, setCurrentCustomer]);
 
-    // Các hàm xử lý giỏ hàng và thanh toán
     const handleAddToCart = useCallback((product) => {
         if (!product || !product.id) { showToast("Lỗi: Sản phẩm không hợp lệ."); return; }
         if (product.stock <= 0) { showToast(`"${product.name}" đã hết hàng!`); return; }
@@ -417,7 +368,7 @@ export default function PosSystemContent() {
                     <header className="bg-white dark:bg-slate-800/50 backdrop-blur-sm border-b border-r border-slate-200 dark:border-slate-700 p-3 flex items-center justify-between flex-shrink-0">
                         <div className="flex items-center gap-3">
                             <Image src={storeInfo.logoUrl || 'https://placehold.co/40x40/6366f1/ffffff?text=POS'} alt="Logo" width={40} height={40} className="object-contain rounded-md bg-slate-200"/>
-                            <div><h1 className="text-lg font-bold">{storeInfo.name}</h1><p className="text-xs text-slate-500 dark:text-slate-400">Quầy 01 - {user.displayName || user.email}</p></div>
+                            <div><h1 className="text-lg font-bold">{storeInfo.name}</h1><p className="text-xs text-slate-500 dark:text-slate-400">Quầy 01 - {user?.displayName || user?.email}</p></div>
                         </div>
                         <div className="flex items-center gap-2">
                             <div className="text-right"><p className="font-semibold text-lg">{currentTime.toLocaleTimeString('vi-VN')}</p><p className="text-xs text-slate-500 dark:text-slate-400">{currentTime.toLocaleDateString('vi-VN')}</p></div>
@@ -449,7 +400,7 @@ export default function PosSystemContent() {
                             </tbody>
                         </table>
                         {cart.length === 0 && (<div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 dark:text-slate-500"><FileText className="w-24 h-24 mb-4"/><p className="font-medium text-lg">Hóa đơn trống</p></div>)}
-                    </div><div className="flex-shrink-0 pt-4 mt-auto flex items-center gap-2"><button onClick={() => setShowCalculator(true)} className="btn-action-outline"><Calculator size={18}/>Máy tính</button><button onClick={() => setShowProductLookup(true)} className="btn-action-outline"><Search size={18}/>Tra cứu</button><button onClick={() => { if(cart.length > 0) { setLastReceiptData({ items: cart, customer: currentCustomer, subtotal, tax, discountAmount, totalAfterDiscount, createdBy: user.displayName, createdAt: new Date(), storeInfo }); setShowReceiptModal(true); }}} disabled={cart.length === 0} className="btn-action-outline disabled:opacity-50"><Printer size={18}/>In tạm</button></div></div>
+                    </div><div className="flex-shrink-0 pt-4 mt-auto flex items-center gap-2"><button onClick={() => setShowCalculator(true)} className="btn-action-outline"><Calculator size={18}/>Máy tính</button><button onClick={() => setShowProductLookup(true)} className="btn-action-outline"><Search size={18}/>Tra cứu</button><button onClick={() => { if(cart.length > 0) { setLastReceiptData({ items: cart, customer: currentCustomer, subtotal, tax, discountAmount, totalAfterDiscount, createdBy: user?.displayName, createdAt: new Date(), storeInfo }); setShowReceiptModal(true); }}} disabled={cart.length === 0} className="btn-action-outline disabled:opacity-50"><Printer size={18}/>In tạm</button></div></div>
                 </div>
 
                 <div className="flex-1 flex flex-col h-screen bg-slate-50 dark:bg-slate-900/50 border-r border-slate-200 dark:border-slate-700">
@@ -475,6 +426,7 @@ export default function PosSystemContent() {
                                 ))
                             )}
                         </div>
+                        
                         {hasMore && !dataLoading && (
                             <div className="mt-6 flex justify-center">
                                 <button onClick={fetchMoreProducts} disabled={loadingMore} className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg font-semibold hover:bg-slate-100 dark:hover:bg-slate-600 disabled:opacity-50">

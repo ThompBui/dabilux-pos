@@ -1,19 +1,27 @@
-// components/DashboardContent.js
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import Sidebar from './Sidebar'; // Đã điều chỉnh đường dẫn
+import Sidebar from './Sidebar';
 import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useRouter } from 'next/router';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import dynamic from 'next/dynamic';
 import { DollarSign, ShoppingCart, TrendingUp, Users, AlertTriangle, Tag, CreditCard, Calendar as CalendarIcon, BarChart } from 'lucide-react';
-import dynamic from 'next/dynamic'; 
 import { format } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import { DayPicker } from 'react-day-picker';
 import 'react-day-picker/dist/style.css';
 
-// --- HÀM HỖ TRỢ ---
+// Tối ưu: Lazy load các component biểu đồ
+const DynamicResponsiveContainer = dynamic(() => import('recharts').then(mod => mod.ResponsiveContainer), { ssr: false });
+const DynamicLineChart = dynamic(() => import('recharts').then(mod => mod.LineChart), { ssr: false });
+const DynamicLine = dynamic(() => import('recharts').then(mod => mod.Line), { ssr: false });
+const DynamicXAxis = dynamic(() => import('recharts').then(mod => mod.XAxis), { ssr: false });
+const DynamicYAxis = dynamic(() => import('recharts').then(mod => mod.YAxis), { ssr: false });
+const DynamicCartesianGrid = dynamic(() => import('recharts').then(mod => mod.CartesianGrid), { ssr: false });
+const DynamicTooltip = dynamic(() => import('recharts').then(mod => mod.Tooltip), { ssr: false });
+const DynamicLegend = dynamic(() => import('recharts').then(mod => mod.Legend), { ssr: false });
+
+// --- CÁC HÀM HỖ TRỢ ---
 const formatCurrency = (amount) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount || 0);
 
 const calculateStats = (bills) => {
@@ -37,7 +45,6 @@ const SectionTitle = ({ title, icon }) => (
     </h2>
 );
 
-// --- COMPONENT CON ---
 const StatCard = ({ title, value, icon, iconBgColor }) => (
     <div className="bg-white dark:bg-slate-800 p-5 rounded-xl shadow-md flex items-center space-x-4">
         <div className={`p-3 rounded-full ${iconBgColor}`}>{icon}</div>
@@ -57,7 +64,6 @@ export default function DashboardContent() {
     const [bills, setBills] = useState([]);
     const [products, setProducts] = useState([]);
     const [customers, setCustomers] = useState([]);
-    // Khai báo dataLoading ĐÚNG VỊ TRÍ, bên trong component
     const [dataLoading, setDataLoading] = useState(true); 
 
     const defaultRange = { from: new Date(new Date().setHours(0, 0, 0, 0)), to: new Date(new Date().setHours(23, 59, 59, 999)) };
@@ -68,137 +74,113 @@ export default function DashboardContent() {
     const [isPickerOpen, setIsPickerOpen] = useState(false);
     const pickerRef = useRef(null);
     
-    // Logic xác thực và chuyển hướng
     useEffect(() => {
-        if (!authLoading) {
-            if (!user) {
-                if (router.pathname !== '/login') {
-                    console.log("AUTH: Chuyển hướng đến /login");
-                    router.push('/login');
-                }
-            } else {
-                console.log("AUTH: Người dùng đã đăng nhập:", user.email);
-            }
-        } else {
-            console.log("AUTH: Đang tải trạng thái xác thực...");
+        if (!authLoading && !user) {
+            router.push('/login');
         }
     }, [user, authLoading, router]);
 
-    // Lắng nghe dữ liệu Firestore
-     useEffect(() => {
-        console.log("DATA: Bắt đầu lắng nghe Firestore data...");
+    useEffect(() => {
         const unsubscribers = [
             onSnapshot(query(collection(db, 'bills'), orderBy('createdAt', 'desc')), (snapshot) => {
                 setBills(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-                console.log("DATA: Bills đã tải:", snapshot.docs.length);
-            }, (error) => {
-                console.error("DATA: Lỗi khi lấy bills:", error);
             }),
             onSnapshot(query(collection(db, 'products'), orderBy('name', 'asc')), (snapshot) => {
                 setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-                console.log("DATA: Products đã tải:", snapshot.docs.length);
-            }, (error) => {
-                console.error("DATA: Lỗi khi lấy products:", error);
             }),
             onSnapshot(query(collection(db, 'customers'), orderBy('name', 'asc')), (snapshot) => {
                 setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-                console.log("DATA: Customers đã tải:", snapshot.docs.length);
-            }, (error) => {
-                console.error("DATA: Lỗi khi lấy customers:", error);
             }),
         ];
 
         const initialLoadTimeout = setTimeout(() => {
             setDataLoading(false);
-            console.log("DATA: dataLoading chuyển sang FALSE sau Timeout.");
-        }, 3000); // 3 giây để đảm bảo dữ liệu Firebase có thời gian tải
+        }, 3000);
 
         return () => {
             unsubscribers.forEach(unsub => unsub());
             clearTimeout(initialLoadTimeout);
-            console.log("DATA: Unsubscribe và clearTimeout đã chạy.");
         };
     }, []);
     
-    // Xử lý đóng date picker khi click bên ngoài
     useEffect(() => {
         function handleClickOutside(event) { if (pickerRef.current && !pickerRef.current.contains(event.target)) setIsPickerOpen(false); }
         document.addEventListener("mousedown", handleClickOutside);
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, [pickerRef]);
 
-    const memoizedData = useMemo(() => {
-        if (dataLoading) return null; // Tránh tính toán khi chưa tải xong
-        
-        const { from, to } = activeRange;
-        const toDateWithTime = to ? new Date(new Date(to).setHours(23, 59, 59, 999)) : new Date(new Date(from).setHours(23, 59, 59, 999));
-        
-        const filteredBills = bills.filter(b => {
-            const billDate = b.createdAt?.toDate();
-            return billDate && billDate >= from && billDate <= toDateWithTime;
+const memoizedData = useMemo(() => {
+    if (dataLoading) return null;
+    
+    const { from, to } = activeRange;
+    const toDateWithTime = to ? new Date(new Date(to).setHours(23, 59, 59, 999)) : new Date(new Date(from).setHours(23, 59, 59, 999));
+    
+    const filteredBills = bills.filter(b => {
+        const billDate = b.createdAt?.toDate();
+        return billDate && billDate >= from && billDate <= toDateWithTime;
+    });
+
+    const currentStats = calculateStats(filteredBills);
+
+    const dailySalesMap = {};
+    filteredBills.forEach(bill => {
+        const billDate = bill.createdAt?.toDate();
+        if (billDate) {
+            const dateKey = format(billDate, 'dd/MM', { locale: vi });
+            dailySalesMap[dateKey] = (dailySalesMap[dateKey] || 0) + (bill.totalAfterDiscount || 0);
+        }
+    });
+    const chartData = Object.keys(dailySalesMap)
+        .sort((a, b) => {
+            const [dayA, monthA] = a.split('/');
+            const [dayB, monthB] = b.split('/');
+            return (new Date(new Date().getFullYear(), monthA - 1, dayA)).getTime() - (new Date(new Date().getFullYear(), monthB - 1, dayB)).getTime();
+        })
+        .map(date => ({ date, DoanhThu: dailySalesMap[date] }));
+
+    const productSales = {};
+    filteredBills.forEach(bill => {
+        (bill.items || []).forEach(item => {
+            productSales[item.id] = productSales[item.id] || { name: item.name, totalQuantity: 0, totalRevenue: 0 };
+            productSales[item.id].totalQuantity += item.quantity;
+            productSales[item.id].totalRevenue += item.quantity * (item.price || 0);
         });
+    });
+    const topSellingProducts = Object.values(productSales).sort((a, b) => b.totalQuantity - a.totalQuantity).slice(0, 5);
 
-        const currentStats = calculateStats(filteredBills);
+    const customerSpending = {};
+    filteredBills.forEach(bill => {
+        if (bill.customer?.id) {
+            // Đảm bảo có customer.id để tổng hợp
+            customerSpending[bill.customer.id] = customerSpending[bill.customer.id] || { id: bill.customer.id, name: bill.customer.name, totalSpent: 0 };
+            customerSpending[bill.customer.id].totalSpent += bill.totalAfterDiscount || 0;
+        }
+    });
+    
+    const topCustomers = Object.values(customerSpending).map(data => {
+        const customerInfo = customers.find(c => c.id === data.id);
+        return {
+            ...data,
+            // Lấy tên từ bản ghi khách hàng nếu có, nếu không thì dùng tên từ hóa đơn
+            name: customerInfo?.name || data.name, 
+            points: customerInfo?.points || 0
+        };
+    }).sort((a, b) => b.totalSpent - a.totalSpent).slice(0, 5);
 
-        const dailySalesMap = {};
-        filteredBills.forEach(bill => {
-            const billDate = bill.createdAt?.toDate();
-            if (billDate) {
-                const dateKey = format(billDate, 'dd/MM', { locale: vi });
-                dailySalesMap[dateKey] = (dailySalesMap[dateKey] || 0) + (bill.totalAfterDiscount || 0);
-            }
-        });
-        const chartData = Object.keys(dailySalesMap)
-            .sort((a, b) => {
-                const [dayA, monthA] = a.split('/');
-                const [dayB, monthB] = b.split('/');
-                const dateA = new Date(new Date().getFullYear(), monthA - 1, dayA);
-                const dateB = new Date(new Date().getFullYear(), monthB - 1, dayB);
-                return dateA.getTime() - dateB.getTime();
-            })
-            .map(date => ({ date, DoanhThu: dailySalesMap[date] }));
+    const lowStockItems = products.filter(p => p.stock !== undefined && p.stock < 10 && p.isActive !== false).slice(0, 5);
 
-        const productSales = {};
-        filteredBills.forEach(bill => {
-            (bill.items || []).forEach(item => {
-                productSales[item.id] = productSales[item.id] || { name: item.name, totalQuantity: 0, totalRevenue: 0 };
-                productSales[item.id].totalQuantity += item.quantity;
-                productSales[item.id].totalRevenue += item.quantity * (item.price || 0);
-            });
-        });
-        const topSellingProducts = Object.values(productSales).sort((a, b) => b.totalQuantity - a.totalQuantity).slice(0, 5);
+    return { currentStats, topSellingProducts, lowStockItems, topCustomers, chartData };
+}, [bills, products, customers, activeRange, dataLoading]);
 
-        const customerSpending = {};
-        filteredBills.forEach(bill => {
-            if (bill.customer?.id) {
-                customerSpending[bill.customer.id] = customerSpending[bill.customer.id] || { name: bill.customer.name, totalSpent: 0 };
-                customerSpending[bill.customer.id].totalSpent += bill.totalAfterDiscount || 0;
-            }
-        });
-        const topCustomers = Object.entries(customerSpending).map(([id, data]) => {
-            const customerInfo = customers.find(c => c.id === id);
-            return { id, ...data, points: customerInfo?.points || 0 };
-        }).sort((a, b) => b.totalSpent - a.totalSpent).slice(0, 5);
-
-        const lowStockItems = products.filter(p => p.stock !== undefined && p.stock < 10 && p.isActive !== false).slice(0, 5);
-
-        return { currentStats, topSellingProducts, lowStockItems, topCustomers, chartData };
-    }, [bills, products, customers, activeRange, dataLoading]);
-
-
-    // HIỂN THỊ MÀN HÌNH TẢI HOẶC NULL KHI CHƯA SẴN SÀNG
-    // Khối kiểm tra này đã được tối ưu và là khối duy nhất
     if (authLoading || dataLoading || !memoizedData) {
-        console.log("RENDER: Hiển thị màn hình tải. authLoading:", authLoading, "dataLoading:", dataLoading, "memoizedData:", memoizedData);
         return (
-            <div className="flex items-center justify-center h-screen bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200">
+            <div className="flex items-center justify-center h-screen bg-slate-100 dark:bg-slate-900">
                 <p className="text-lg font-semibold">Đang tải dữ liệu...</p>
             </div>
         );
     }
 
-    if (!user) { // Sau khi authLoading và dataLoading đã false
-        console.log("RENDER: Không có người dùng, trả về null.");
+    if (!user) {
         return null;
     }
 
@@ -241,7 +223,6 @@ export default function DashboardContent() {
                         <h1 className="text-3xl font-bold">Tổng quan cửa hàng</h1>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                        {/* CÁC NÚT LỌC NHANH */}
                         <button onClick={() => handlePresetFilter('today')} className={`px-3 py-1.5 text-sm rounded-lg font-semibold ${activePreset === 'today' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-700'}`}>Hôm nay</button>
                         <button onClick={() => handlePresetFilter('thisWeek')} className={`px-3 py-1.5 text-sm rounded-lg font-semibold ${activePreset === 'thisWeek' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-700'}`}>Tuần này</button>
                         <button onClick={() => handlePresetFilter('thisMonth')} className={`px-3 py-1.5 text-sm rounded-lg font-semibold ${activePreset === 'thisMonth' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-700'}`}>Tháng này</button>
@@ -278,27 +259,27 @@ export default function DashboardContent() {
                 <section className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md mb-8">
                     <SectionTitle title="Biểu đồ Doanh thu (Theo Ngày)" icon={<BarChart size={20} />} />
                     <div className="h-72">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={memoizedData.chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                                <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis dataKey="date" />
-                                <YAxis tickFormatter={(value) => new Intl.NumberFormat('vi-VN', { notation: 'compact' }).format(value)}/>
-                                <Tooltip formatter={(value) => formatCurrency(value)} />
-                                <Legend />
-                                <Line type="monotone" dataKey="DoanhThu" name="Doanh thu" stroke="#4f46e5" strokeWidth={2} activeDot={{ r: 8 }} />
-                            </LineChart>
-                        </ResponsiveContainer>
+                        <DynamicResponsiveContainer width="100%" height="100%">
+                            <DynamicLineChart data={memoizedData.chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                                <DynamicCartesianGrid strokeDasharray="3 3" />
+                                <DynamicXAxis dataKey="date" />
+                                <DynamicYAxis tickFormatter={(value) => new Intl.NumberFormat('vi-VN', { notation: 'compact' }).format(value)}/>
+                                <DynamicTooltip formatter={(value) => formatCurrency(value)} />
+                                <DynamicLegend />
+                                <DynamicLine type="monotone" dataKey="DoanhThu" name="Doanh thu" stroke="#4f46e5" strokeWidth={2} activeDot={{ r: 8 }} />
+                            </DynamicLineChart>
+                        </DynamicResponsiveContainer>
                     </div>
                 </section>
                 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
                     <section className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md">
                         <SectionTitle title="Sản phẩm bán chạy nhất" icon={<Tag size={20} />} />
-                        <div className="overflow-x-auto"><table className="min-w-full text-sm text-left"><thead className="bg-slate-50 dark:bg-slate-700/50 text-xs uppercase bg-slate-50 dark:bg-slate-700/50"><tr><th className="px-4 py-2">Tên SP</th><th className="px-4 py-2 text-center">SL bán</th><th className="px-4 py-2 text-right">Doanh thu</th></tr></thead><tbody className="divide-y divide-slate-200 dark:divide-slate-700">{memoizedData.topSellingProducts.length > 0 ? (memoizedData.topSellingProducts.map((p, i) => (<tr key={i}><td className="px-4 py-3 font-medium">{p.name}</td><td className="px-4 py-3 text-center">{p.totalQuantity}</td><td className="px-4 py-3 text-right">{formatCurrency(p.totalRevenue)}</td></tr>))) : (<tr><td colSpan="3" className="text-center py-4 text-slate-400">Không có dữ liệu.</td></tr>)}</tbody></table></div>
+                        <div className="overflow-x-auto"><table className="min-w-full text-sm text-left"><thead className="bg-slate-50 dark:bg-slate-700/50 text-xs uppercase"><tr><th className="px-4 py-2">Tên SP</th><th className="px-4 py-2 text-center">SL bán</th><th className="px-4 py-2 text-right">Doanh thu</th></tr></thead><tbody className="divide-y divide-slate-200 dark:divide-slate-700">{memoizedData.topSellingProducts.length > 0 ? (memoizedData.topSellingProducts.map((p, i) => (<tr key={i}><td className="px-4 py-3 font-medium">{p.name}</td><td className="px-4 py-3 text-center">{p.totalQuantity}</td><td className="px-4 py-3 text-right">{formatCurrency(p.totalRevenue)}</td></tr>))) : (<tr><td colSpan="3" className="text-center py-4 text-slate-400">Không có dữ liệu.</td></tr>)}</tbody></table></div>
                     </section>
                     <section className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md">
                         <SectionTitle title="Sản phẩm sắp hết hàng" icon={<AlertTriangle size={20} className="text-orange-500" />} />
-                        <div className="overflow-x-auto"><table className="min-w-full text-sm text-left"><thead className="bg-slate-50 dark:bg-slate-700/50 text-xs uppercase bg-slate-50 dark:bg-slate-700/50"><tr><th className="px-4 py-2">Tên SP</th><th className="px-4 py-2 text-center">Tồn kho</th></tr></thead><tbody className="divide-y divide-slate-200 dark:divide-slate-700">{memoizedData.lowStockItems.length > 0 ? (memoizedData.lowStockItems.map(item => (<tr key={item.id}><td className="px-4 py-3 font-medium">{item.name}</td><td className="px-4 py-3 text-center text-orange-500 font-bold">{item.stock}</td></tr>))) : (<tr><td colSpan="2" className="text-center py-4 text-slate-400">Không có sản phẩm nào.</td></tr>)}</tbody></table></div>
+                        <div className="overflow-x-auto"><table className="min-w-full text-sm text-left"><thead className="bg-slate-50 dark:bg-slate-700/50 text-xs uppercase"><tr><th className="px-4 py-2">Tên SP</th><th className="px-4 py-2 text-center">Tồn kho</th></tr></thead><tbody className="divide-y divide-slate-200 dark:divide-slate-700">{memoizedData.lowStockItems.length > 0 ? (memoizedData.lowStockItems.map(item => (<tr key={item.id}><td className="px-4 py-3 font-medium">{item.name}</td><td className="px-4 py-3 text-center text-orange-500 font-bold">{item.stock}</td></tr>))) : (<tr><td colSpan="2" className="text-center py-4 text-slate-400">Không có sản phẩm nào.</td></tr>)}</tbody></table></div>
                     </section>
                 </div>
                 

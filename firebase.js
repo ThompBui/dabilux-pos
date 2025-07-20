@@ -10,6 +10,12 @@ const firebaseConfig = {
   messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
+console.log("KEY TEST:", process.env.NEXT_PUBLIC_FIREBASE_API_KEY);
+
+if (!process.env.NEXT_PUBLIC_FIREBASE_API_KEY) {
+  throw new Error("Thiếu API key! Kiểm tra biến môi trường.");
+}
+
 
 let app;
 if (!getApps().length) {

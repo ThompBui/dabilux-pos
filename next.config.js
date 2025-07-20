@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: 'export', // <<< THÊM DÒNG NÀY VÀO ĐÂY
+  // output: 'export', // <<< XÓA DÒNG NÀY
   reactStrictMode: true,
   images: {
     remotePatterns: [

@@ -14,9 +14,7 @@ import {
   query,
   orderBy,
   where,
-  limit,
   getDocs,
-  startAfter
 } from 'firebase/firestore';
 import {
     ShoppingBasket, Sun, Moon, Barcode, FileText, Calculator, Search,
@@ -40,29 +38,20 @@ const NotificationPanel = dynamic(() => import('./NotificationPanel'), { ssr: fa
 function usePersistentState(key, defaultValue) {
     const [state, setState] = useState(defaultValue);
     const [isHydrated, setIsHydrated] = useState(false);
-
     useEffect(() => {
         try {
             const persistentState = localStorage.getItem(key);
-            if (persistentState) {
-                setState(JSON.parse(persistentState));
-            }
-        } catch (error) {
-            console.warn(`Lỗi đọc localStorage key “${key}”:`, error);
-        }
+            if (persistentState) setState(JSON.parse(persistentState));
+        } catch (error) { console.warn(`Lỗi đọc localStorage key “${key}”:`, error); }
         setIsHydrated(true);
     }, [key]);
-
     useEffect(() => {
         if (isHydrated) {
             try {
                 localStorage.setItem(key, JSON.stringify(state));
-            } catch (error) {
-                console.warn(`Lỗi ghi localStorage key “${key}”:`, error);
-            }
+            } catch (error) { console.warn(`Lỗi ghi localStorage key “${key}”:`, error); }
         }
     }, [key, state, isHydrated]);
-
     return [state, setState];
 }
 
@@ -106,20 +95,15 @@ const Toast = ({ message, show }) => (
     </div>
 );
 
-
 export default function PosSystemContent() {
     const [user, authLoading] = useAuthState(auth);
     const router = useRouter();
     
     const [allProducts, setAllProducts] = useState([]);
-    const [filteredProducts, setFilteredProducts] = useState([]); // Quay lại dùng useState
     const [customers, setCustomers] = useState([]);
     const [storeInfo, setStoreInfo] = useState({ name: 'BuiAnh POS', logoUrl: '' });
     
     const [dataLoading, setDataLoading] = useState(true);
-    const [lastVisible, setLastVisible] = useState(null);
-    const [loadingMore, setLoadingMore] = useState(false);
-    const [hasMore, setHasMore] = useState(true);
 
     const [theme, setTheme] = useState('light');
     const [currentTime, setCurrentTime] = useState(new Date());
@@ -146,75 +130,64 @@ export default function PosSystemContent() {
         setTimeout(() => setToast({ show: false, message: '' }), 3000);
     }, []);
 
-    // Tải dữ liệu ban đầu
+    useEffect(() => {
+        const root = window.document.documentElement;
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        setTheme(savedTheme);
+        root.classList.toggle('dark', savedTheme === 'dark');
+    }, []);
+    
+    useEffect(() => {
+        const root = window.document.documentElement;
+        root.classList.toggle('dark', theme === 'dark');
+        localStorage.setItem('theme', theme);
+    }, [theme]);
+
     useEffect(() => {
         if (!user) return;
-
-        const unsubCustomers = onSnapshot(collection(db, 'customers'), (snapshot) => {
-            setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        });
-        const unsubStoreInfo = onSnapshot(doc(db, 'settings', 'storeInfo'), (docSnap) => {
-            if (docSnap.exists()) setStoreInfo(docSnap.data());
-        });
-
-        const fetchInitialProducts = async () => {
-            setDataLoading(true);
-            const productsRef = collection(db, 'products');
-            const q = query(productsRef, where('isActive', '!=', false), orderBy('name', 'asc'), limit(24));
-
-            const documentSnapshots = await getDocs(q);
-            const productsData = documentSnapshots.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            const lastDoc = documentSnapshots.docs[documentSnapshots.docs.length - 1];
-
-            setLastVisible(lastDoc);
+        setDataLoading(true);
+        const unsubCustomers = onSnapshot(collection(db, 'customers'), (snapshot) => setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
+        const unsubStoreInfo = onSnapshot(doc(db, 'settings', 'storeInfo'), (docSnap) => { if (docSnap.exists()) setStoreInfo(docSnap.data()); });
+        const q = query(collection(db, 'products'), orderBy('name', 'asc'));
+        const unsubProducts = onSnapshot(q, (snapshot) => {
+            const productsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             setAllProducts(productsData);
-            setFilteredProducts(productsData); // Cập nhật trực tiếp ở đây
-            
-            if (documentSnapshots.docs.length < 24) setHasMore(false);
             setDataLoading(false);
-        };
-
-        fetchInitialProducts();
-
-        return () => {
-            unsubCustomers();
-            unsubStoreInfo();
-        };
+        });
+        return () => { unsubCustomers(); unsubStoreInfo(); unsubProducts(); };
     }, [user]);
+    
+    const activeProducts = useMemo(() => allProducts.filter(p => p.isActive !== false), [allProducts]);
+    
+    const filteredProducts = useMemo(() => {
+        if (activeCategory === 'all') return activeProducts;
+        return activeProducts.filter(p => p.category === activeCategory);
+    }, [activeCategory, activeProducts]);
 
-    // Hàm tải thêm sản phẩm
-    const fetchMoreProducts = async () => {
-        if (!hasMore || loadingMore) return;
-        setLoadingMore(true);
+    useEffect(() => {
+        const lowStock = allProducts.filter(p => p.stock !== undefined && p.stock <= 10 && p.isActive !== false);
+        setLowStockProducts(lowStock);
+    }, [allProducts]);
+    
+    useEffect(() => {
+        const dismissed = localStorage.getItem('dismissedLowStockAlerts');
+        if (dismissed) setDismissedNotifications(JSON.parse(dismissed));
+    }, []);
 
-        const productsRef = collection(db, 'products');
-        const q = query(productsRef, where('isActive', '!=', false), orderBy('name', 'asc'), startAfter(lastVisible), limit(24));
-        
-        const documentSnapshots = await getDocs(q);
-        const newProductsData = documentSnapshots.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        const lastDoc = documentSnapshots.docs[documentSnapshots.docs.length - 1];
+    const undismissedNotifications = useMemo(() => {
+        return lowStockProducts.filter(p => !dismissedNotifications.includes(p.id));
+    }, [lowStockProducts, dismissedNotifications]);
 
-        setLastVisible(lastDoc);
-        setAllProducts(prev => [...prev, ...newProductsData]);
-
-        if (documentSnapshots.docs.length < 24) setHasMore(false);
-        setLoadingMore(false);
+    const handleDismissNotification = (productId) => {
+        const newDismissed = [...dismissedNotifications, productId];
+        setDismissedNotifications(newDismissed);
+        localStorage.setItem('dismissedLowStockAlerts', JSON.stringify(newDismissed));
     };
 
-    // useEffect để lọc sản phẩm
-    useEffect(() => {
-        if (activeCategory === 'all') {
-            setFilteredProducts(allProducts);
-        } else {
-            setFilteredProducts(allProducts.filter(p => p.category === activeCategory));
-        }
-    }, [activeCategory, allProducts]);
-    
     useEffect(() => { if (!authLoading && !user) router.push('/login'); }, [user, authLoading, router]);
     useEffect(() => { const timer = setInterval(() => setCurrentTime(new Date()), 1000); return () => clearInterval(timer); }, []);
     useEffect(() => { setPointsToUse(''); }, [currentCustomer]);
 
-    // Các hàm và useMemo khác giữ nguyên ...
     const categories = useMemo(() => ['all', ...new Set(allProducts.map(p => p.category).filter(Boolean))], [allProducts]);
     const { subtotal, tax, total } = useMemo(() => {
         const sub = cart.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 0), 0);
@@ -291,7 +264,7 @@ export default function PosSystemContent() {
             showToast('Đã khôi phục hóa đơn.');
         }
     };
-    
+
     const handleDenominationClick = (amount) => {
         const currentAmount = parseCurrency(cashReceived);
         const newAmount = currentAmount + amount;
@@ -299,10 +272,9 @@ export default function PosSystemContent() {
     };
     
     const handleClearCashReceived = () => { setCashReceived(''); };
-
+    
     const finalizeSale = useCallback(async (saleCart, saleCustomer, salePointsUsedStr, paymentMethod) => {
         if (!saleCart || saleCart.length === 0) { showToast("Lỗi: Giỏ hàng trống."); return; }
-        
         try {
             await runTransaction(db, async (transaction) => {
                 const saleSubtotal = saleCart.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -325,26 +297,25 @@ export default function PosSystemContent() {
                 }
                 
                 let finalCustomerData = null;
+                let pointsEarnedThisTransaction = 0;
                 if (saleCustomer) {
                     const customerRef = doc(db, 'customers', saleCustomer.id);
                     const customerDoc = await transaction.get(customerRef);
                     const serverPoints = customerDoc.exists() ? (customerDoc.data().points || 0) : 0;
                     const pointsUsedThisTransaction = Math.min(salePointsUsed, serverPoints);
-                    const pointsEarnedThisTransaction = Math.floor(saleSubtotal / 10000);
+                    pointsEarnedThisTransaction = Math.floor(saleSubtotal / 10000);
                     const finalCustomerPoints = serverPoints - pointsUsedThisTransaction + pointsEarnedThisTransaction;
                     transaction.update(customerRef, { points: finalCustomerPoints });
                     finalCustomerData = { ...saleCustomer, points: finalCustomerPoints };
                 }
                 
-                const billData = { items: saleCart, customer: finalCustomerData, subtotal: saleSubtotal, tax: saleTax, discountAmount: saleDiscountAmount, totalAfterDiscount: saleTotalAfterDiscount, paymentMethod, createdBy: user.email, createdAt: serverTimestamp(), pointsEarned: finalCustomerData ? Math.floor(saleSubtotal / 10000) : 0, pointsUsed: finalCustomerData ? Math.min(salePointsUsed, saleCustomer.points || 0) : 0, storeInfo };
+                const billData = { items: saleCart, customer: finalCustomerData, subtotal: saleSubtotal, tax: saleTax, discountAmount: saleDiscountAmount, totalAfterDiscount: saleTotalAfterDiscount, paymentMethod, createdBy: user.email, createdAt: serverTimestamp(), pointsEarned: pointsEarnedThisTransaction, pointsUsed: finalCustomerData ? Math.min(salePointsUsed, saleCustomer.points || 0) : 0, storeInfo };
                 transaction.set(doc(collection(db, 'bills')), billData);
                 setLastReceiptData({ ...billData, createdAt: new Date(), customer: finalCustomerData, storeInfo });
             });
             setShowReceiptModal(true);
             resetTransaction();
-        } catch (error) {
-            showToast(`Lỗi thanh toán: ${error.message}`);
-        }
+        } catch (error) { showToast(`Lỗi thanh toán: ${error.message}`); }
     }, [user, storeInfo, resetTransaction, showToast]);
 
     const initiateCheckout = () => {
@@ -357,9 +328,7 @@ export default function PosSystemContent() {
         }
     };
 
-    if (authLoading) {
-        return <div className="flex items-center justify-center h-screen bg-slate-100 dark:bg-slate-900"><p className="text-lg font-semibold">Đang kiểm tra đăng nhập...</p></div>;
-    }
+    if (authLoading) return <div className="flex items-center justify-center h-screen"><p>Đang kiểm tra...</p></div>;
 
     return (
         <>
@@ -376,37 +345,51 @@ export default function PosSystemContent() {
                         </div>
                     </header>
                     <div className="p-4 bg-white dark:bg-slate-800 border-b border-r border-slate-200 dark:border-slate-700"><div className="relative"><Barcode className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 text-slate-400"/><input type="text" placeholder="Quét mã vạch hoặc nhập tên (F3)..." className="w-full bg-slate-100 dark:bg-slate-700 rounded-lg pl-14 pr-4 py-4 text-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"/></div></div>
-                    <div className="flex-grow p-4 flex flex-col border-r border-slate-200 dark:border-slate-700 overflow-hidden"><div className="flex-grow overflow-y-auto relative">
-                        <table className="w-full text-sm text-left table-fixed">
-                            <thead className="text-xs text-slate-700 dark:text-slate-300 uppercase bg-slate-50 dark:bg-slate-700/50 sticky top-0 z-10">
-                                <tr>
-                                    <th className="px-4 py-2 w-[8%]">#</th>
-                                    <th className="px-4 py-2 w-[42%]">Sản phẩm</th>
-                                    <th className="px-4 py-2 w-[20%] text-center">SL</th>
-                                    <th className="px-4 py-2 w-[20%] text-right">T.Tiền</th>
-                                    <th className="px-4 py-2 w-[10%] text-center">Xóa</th>
-                                </tr>
-                            </thead>
-                            <tbody className="bg-white dark:bg-slate-800 divide-y divide-slate-200 dark:divide-slate-700">
-                                {cart.map((item, index) => (
-                                    <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
-                                        <td className="px-4 py-3">{index + 1}</td>
-                                        <td className="px-4 py-3 font-semibold truncate">{item.name}</td>
-                                        <td className="px-4 py-3"><input type="number" value={item.quantity} min="1" onChange={(e) => handleUpdateQuantity(item.id, e.target.value)} className="w-20 mx-auto text-center bg-slate-100 dark:bg-slate-700 rounded-md p-1 border-slate-300 dark:border-slate-600"/></td>
-                                        <td className="px-4 py-3 text-right font-bold">{formatCurrency(item.price * item.quantity)}</td>
-                                        <td className="px-4 py-3 text-center"><button onClick={() => handleRemoveFromCart(item.id)} className="text-red-500 hover:text-red-700"><Trash2 className="w-5 h-5 mx-auto"/></button></td>
+                    <div className="flex-grow p-4 flex flex-col border-r border-slate-200 dark:border-slate-700 overflow-hidden">
+                        <div className="flex-grow overflow-y-auto relative">
+                            <table className="w-full text-sm text-left table-fixed">
+                                <thead className="text-xs text-slate-700 dark:text-slate-300 uppercase bg-slate-50 dark:bg-slate-700/50 sticky top-0 z-10">
+                                    <tr>
+                                        <th className="px-4 py-2 w-[8%]">#</th>
+                                        <th className="px-4 py-2 w-[42%]">Sản phẩm</th>
+                                        <th className="px-4 py-2 w-[20%] text-center">SL</th>
+                                        <th className="px-4 py-2 w-[20%] text-right">T.Tiền</th>
+                                        <th className="px-4 py-2 w-[10%] text-center">Xóa</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                        {cart.length === 0 && (<div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 dark:text-slate-500"><FileText className="w-24 h-24 mb-4"/><p className="font-medium text-lg">Hóa đơn trống</p></div>)}
-                    </div><div className="flex-shrink-0 pt-4 mt-auto flex items-center gap-2"><button onClick={() => setShowCalculator(true)} className="btn-action-outline"><Calculator size={18}/>Máy tính</button><button onClick={() => setShowProductLookup(true)} className="btn-action-outline"><Search size={18}/>Tra cứu</button><button onClick={() => { if(cart.length > 0) { setLastReceiptData({ items: cart, customer: currentCustomer, subtotal, tax, discountAmount, totalAfterDiscount, createdBy: user?.displayName, createdAt: new Date(), storeInfo }); setShowReceiptModal(true); }}} disabled={cart.length === 0} className="btn-action-outline disabled:opacity-50"><Printer size={18}/>In tạm</button></div></div>
+                                </thead>
+                                <tbody className="bg-white dark:bg-slate-800 divide-y divide-slate-200 dark:divide-slate-700">
+                                    {cart.map((item, index) => (
+                                        <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                                            <td className="px-4 py-3">{index + 1}</td>
+                                            <td className="px-4 py-3 font-semibold truncate">{item.name}</td>
+                                            <td className="px-4 py-3"><input type="number" value={item.quantity} min="1" onChange={(e) => handleUpdateQuantity(item.id, e.target.value)} className="w-20 mx-auto text-center bg-slate-100 dark:bg-slate-700 rounded-md p-1 border-slate-300 dark:border-slate-600"/></td>
+                                            <td className="px-4 py-3 text-right font-bold">{formatCurrency(item.price * item.quantity)}</td>
+                                            <td className="px-4 py-3 text-center"><button onClick={() => handleRemoveFromCart(item.id)} className="text-red-500 hover:text-red-700"><Trash2 className="w-5 h-5 mx-auto"/></button></td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            {cart.length === 0 && (<div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 dark:text-slate-500"><FileText className="w-24 h-24 mb-4"/><p className="font-medium text-lg">Hóa đơn trống</p></div>)}
+                        </div>
+                        <div className="flex-shrink-0 pt-4 mt-auto flex items-center gap-2">
+                            <button onClick={() => setShowCalculator(true)} className="btn-action-outline"><Calculator size={18}/>Máy tính</button>
+                            <button onClick={() => setShowProductLookup(true)} className="btn-action-outline"><Search size={18}/>Tra cứu</button>
+                            <button onClick={() => { if(cart.length > 0) { setLastReceiptData({ items: cart, customer: currentCustomer, subtotal, tax, discountAmount, totalAfterDiscount, createdBy: user?.displayName, createdAt: new Date(), storeInfo }); setShowReceiptModal(true); }}} disabled={cart.length === 0} className="btn-action-outline disabled:opacity-50"><Printer size={18}/>In tạm</button>
+                        </div>
+                    </div>
                 </div>
 
                 <div className="flex-1 flex flex-col h-screen bg-slate-50 dark:bg-slate-900/50 border-r border-slate-200 dark:border-slate-700">
                    <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex-shrink-0 flex justify-between items-center">
                         <h2 className="text-lg font-bold">Danh mục sản phẩm</h2>
                         <div className="flex items-center gap-2">
+                            <div className="relative">
+                                <button onClick={() => setShowNotifications(prev => !prev)} className="p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700" title="Thông báo">
+                                    <Bell size={20}/>
+                                    {undismissedNotifications.length > 0 && (<span className="absolute top-1 right-1 block h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-slate-800/50"></span>)}
+                                </button>
+                                <NotificationPanel isOpen={showNotifications} onClose={() => setShowNotifications(false)} notifications={undismissedNotifications} onDismiss={handleDismissNotification} />
+                            </div>
                             <a href="/dashboard" className="flex items-center gap-2 px-3 py-1.5 text-sm font-semibold border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700"><LogOut size={16}/><span>Trang quản lý</span></a>
                         </div>
                    </div>
@@ -414,7 +397,7 @@ export default function PosSystemContent() {
                    <div className="flex-grow p-4 overflow-y-auto">
                         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
                             {dataLoading ? (
-                                Array.from({ length: 24 }).map((_, i) => <ProductSkeleton key={i} />)
+                                Array.from({ length: 18 }).map((_, i) => <ProductSkeleton key={i} />)
                             ) : (
                                 filteredProducts.map(product => (
                                     <div key={product.id} onClick={product.stock > 0 ? () => handleAddToCart(product) : undefined} className={`relative bg-white dark:bg-slate-800 rounded-lg p-3 flex flex-col items-center text-center transform transition-all duration-200 shadow-md ${product.stock > 0 ? 'cursor-pointer hover:scale-105 hover:shadow-lg' : 'opacity-50 grayscale cursor-not-allowed'}`}>
@@ -426,14 +409,6 @@ export default function PosSystemContent() {
                                 ))
                             )}
                         </div>
-                        
-                        {hasMore && !dataLoading && (
-                            <div className="mt-6 flex justify-center">
-                                <button onClick={fetchMoreProducts} disabled={loadingMore} className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg font-semibold hover:bg-slate-100 dark:hover:bg-slate-600 disabled:opacity-50">
-                                    {loadingMore ? <><Loader2 className="animate-spin" size={18}/> Đang tải...</> : 'Tải thêm sản phẩm'}
-                                </button>
-                            </div>
-                        )}
                    </div>
                 </div>
 
@@ -446,7 +421,7 @@ export default function PosSystemContent() {
                         {currentCustomer && (<div className="space-y-2 py-2 border-t border-dashed dark:border-slate-700"><label className="font-semibold text-sm block">Sử dụng điểm ({currentCustomer.points || 0})</label><input type="text" value={pointsToUse} onChange={(e) => setPointsToUse(e.target.value.replace(/[^\d]/g, ''))} className="w-full bg-slate-100 dark:bg-slate-700 rounded-lg p-2 text-lg font-bold text-right" placeholder="0"/>{discountAmount > 0 && <div className="flex justify-between text-green-600"><span>Giảm giá:</span><span className="font-semibold">- {formatCurrency(discountAmount)}</span></div>}</div>)}
                         <div className="my-3 py-3 border-t border-b border-dashed dark:border-slate-600"><div className="flex justify-between items-center text-2xl font-bold"><span>Khách cần trả</span><span className="text-indigo-500">{formatCurrency(totalAfterDiscount)}</span></div></div>
                         <div className="space-y-2"><label htmlFor="cash-received" className="font-semibold">Tiền khách đưa</label><input type="text" id="cash-received" value={cashReceived} onChange={(e) => setCashReceived(new Intl.NumberFormat('vi-VN').format(parseCurrency(e.target.value)) || '')} className="w-full bg-slate-100 dark:bg-slate-700 rounded-lg p-3 text-2xl font-bold text-right" placeholder="0"/></div>
-                        <div className="grid grid-cols-4 gap-2 pt-2">{[10000, 20000, 50000, 100000, 200000, 500000].map(value => (<button key={value} onClick={() => handleDenominationClick(value)} className="text-sm font-semibold py-2 bg-slate-200 dark:bg-slate-700 rounded-md hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">{new Intl.NumberFormat('vi-VN').format(value)}</button>))}<button onClick={handleClearCashReceived} className="col-span-2 text-sm font-semibold py-2 bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300 rounded-md hover:bg-red-200 dark:hover:bg-red-900 transition-colors">Xóa</button></div>
+                        <div className="grid grid-cols-4 gap-2 pt-2">{[10000, 20000, 50000, 100000, 200000, 500000].map(value => (<button key={value} onClick={() => { const current = parseCurrency(cashReceived); setCashReceived(new Intl.NumberFormat('vi-VN').format(current + value))}} className="text-sm font-semibold py-2 bg-slate-200 dark:bg-slate-700 rounded-md hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">{new Intl.NumberFormat('vi-VN').format(value)}</button>))}<button onClick={() => setCashReceived('')} className="col-span-2 text-sm font-semibold py-2 bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300 rounded-md hover:bg-red-200 dark:hover:bg-red-900 transition-colors">Xóa</button></div>
                         <div className="flex justify-between items-center text-xl font-bold text-green-600 dark:text-green-400"><span>Tiền thừa</span><span>{formatCurrency(changeAmount)}</span></div>
                     </div>
                     <div className="p-4 mt-auto bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-700">

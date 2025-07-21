@@ -207,188 +207,161 @@ export default function PosSystemContent() {
     }, [cashReceived, totalAfterDiscount]);
 
     const resetTransaction = useCallback(() => { setCart([]); setCurrentCustomer(null); setCashReceived(''); setPointsToUse(''); }, [setCart, setCurrentCustomer]);
-    const handleAddToCart = useCallback((product) => { /* ... */ }, [setCart, showToast]);
-    const handleUpdateQuantity = useCallback((productId, newQuantityStr) => { /* ... */ }, [allProducts, setCart, showToast]);
+    
+    const handleAddToCart = useCallback((product) => {
+        if (!product || !product.id) {
+            showToast("Lỗi: Sản phẩm không hợp lệ.");
+            return;
+        }
+        if (product.stock <= 0) {
+            showToast(`"${product.name}" đã hết hàng!`);
+            return;
+        }
+        setCart(prevCart => {
+            const existingItem = prevCart.find(item => item.id === product.id);
+            if (existingItem) {
+                if (existingItem.quantity >= product.stock) {
+                    showToast(`Đã đạt số lượng tồn kho.`);
+                    return prevCart;
+                }
+                return prevCart.map(item =>
+                    item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+                );
+            }
+            return [...prevCart, { ...product, quantity: 1 }];
+        });
+    }, [setCart, showToast]);
+    
+    const handleUpdateQuantity = useCallback((productId, newQuantityStr) => {
+        const newQuantity = Math.max(1, parseInt(newQuantityStr, 10) || 1);
+        const productInAll = allProducts.find(p => p.id === productId);
+        if (productInAll && newQuantity > productInAll.stock) {
+            showToast(`Chỉ còn ${productInAll.stock} "${productInAll.name}" trong kho.`);
+            setCart(prevCart => prevCart.map(item =>
+                item.id === productId ? { ...item, quantity: productInAll.stock } : item
+            ));
+            return;
+        }
+        setCart(prevCart => prevCart.map(item =>
+            item.id === productId ? { ...item, quantity: newQuantity } : item
+        ));
+    }, [allProducts, setCart, showToast]);
+
     const handleRemoveFromCart = useCallback((productId) => { setCart(prev => prev.filter(item => item.id !== productId)); }, [setCart]);
     const handleCategoryFilter = useCallback((category) => { setActiveCategory(category); }, []);
-    const handleAddNewCustomer = useCallback(async (newCustomerData) => { /* ... */ }, [setCurrentCustomer, showToast]);
-    const handleHoldBill = () => { /* ... */ };
-    const handleRestoreBill = (billId) => { /* ... */ };
+    
+    const handleAddNewCustomer = useCallback(async (newCustomerData) => {
+        try {
+            const docRef = await addDoc(collection(db, "customers"), { ...newCustomerData, points: 0, createdAt: serverTimestamp() });
+            setCurrentCustomer({ id: docRef.id, ...newCustomerData, points: 0 });
+            showToast("Thêm khách hàng thành công!");
+        } catch (e) { showToast("Lỗi: Không thể thêm khách hàng."); }
+    }, [setCurrentCustomer, showToast]);
+    
+    const handleHoldBill = () => {
+        if (cart.length === 0) { showToast('Không có hóa đơn để giữ!'); return; }
+        setHeldBills(prev => [...prev, { id: Date.now(), cart, customer: currentCustomer, total: totalAfterDiscount, time: new Date(), pointsToUse }]);
+        resetTransaction();
+        showToast('Đã giữ hóa đơn thành công.');
+    };
+    
+    const handleRestoreBill = (billId) => {
+        const bill = heldBills.find(b => b.id === billId);
+        if (bill) {
+            setCart(bill.cart);
+            setCurrentCustomer(bill.customer);
+            setPointsToUse(bill.pointsToUse || '');
+            setHeldBills(prev => prev.filter(b => b.id !== billId));
+            showToast('Đã khôi phục hóa đơn.');
+        }
+    };
+    
     const handleDenominationClick = (amount) => {
         const currentAmount = parseCurrency(cashReceived);
         const newAmount = currentAmount + amount;
         setCashReceived(new Intl.NumberFormat('vi-VN').format(newAmount));
     };
+    
     const handleClearCashReceived = () => { setCashReceived(''); };
     
-   const finalizeSale = useCallback(async (saleCart, saleCustomer, salePointsUsedStr, paymentMethod) => {
-    if (!saleCart || saleCart.length === 0) {
-        showToast("Lỗi: Giỏ hàng trống.");
-        return;
-    }
-
-    try {
-        await runTransaction(db, async (transaction) => {
-            // --- GIAI ĐOẠN ĐỌC (READ PHASE) ---
-            // Đọc tất cả các document cần thiết trước
-            const productRefs = saleCart.map(item => doc(db, 'products', item.id));
-            const productDocs = await Promise.all(productRefs.map(ref => transaction.get(ref)));
-            let customerDoc = null;
-            if (saleCustomer) {
-                const customerRef = doc(db, 'customers', saleCustomer.id);
-                customerDoc = await transaction.get(customerRef);
-            }
-
-            // --- GIAI ĐOẠN KIỂM TRA & TÍNH TOÁN (LOGIC PHASE) ---
-            // Kiểm tra tồn kho
-            for (let i = 0; i < productDocs.length; i++) {
-                const productDoc = productDocs[i];
-                const cartItem = saleCart[i];
-                if (!productDoc.exists() || productDoc.data().stock < cartItem.quantity) {
-                    throw new Error(`Tồn kho không đủ cho "${cartItem.name}".`);
+    const finalizeSale = useCallback(async (saleCart, saleCustomer, salePointsUsedStr, paymentMethod) => {
+        if (!saleCart || saleCart.length === 0) { showToast("Lỗi: Giỏ hàng trống."); return; }
+        try {
+            await runTransaction(db, async (transaction) => {
+                const productRefs = saleCart.map(item => doc(db, 'products', item.id));
+                const productDocs = await Promise.all(productRefs.map(ref => transaction.get(ref)));
+                let customerDoc = null;
+                if (saleCustomer) {
+                    const customerRef = doc(db, 'customers', saleCustomer.id);
+                    customerDoc = await transaction.get(customerRef);
                 }
-            }
-            
-            // Tính toán các giá trị
-            const saleSubtotal = saleCart.reduce((sum, item) => sum + item.price * item.quantity, 0);
-            const saleTax = saleSubtotal * 0.1;
-            const saleTotal = saleSubtotal + saleTax;
-            const salePointsUsed = parseCurrency(salePointsUsedStr);
-            let saleDiscountAmount = 0;
-            let finalCustomerData = null;
-            let pointsEarnedThisTransaction = 0;
-
-            if (saleCustomer && customerDoc && customerDoc.exists()) {
-                const serverPoints = customerDoc.data().points || 0;
-                const pointsUsedThisTransaction = Math.min(salePointsUsed, serverPoints);
-                saleDiscountAmount = Math.min(pointsUsedThisTransaction * 1000, saleTotal);
-                pointsEarnedThisTransaction = Math.floor(saleSubtotal / 10000);
-                const finalCustomerPoints = serverPoints - pointsUsedThisTransaction + pointsEarnedThisTransaction;
-                finalCustomerData = { ...saleCustomer, points: finalCustomerPoints };
-            }
-
-            const saleTotalAfterDiscount = saleTotal - saleDiscountAmount;
-
-            // --- GIAI ĐOẠN GHI (WRITE PHASE) ---
-            // Cập nhật tồn kho sản phẩm
-            productDocs.forEach((productDoc, i) => {
-                const productRef = doc(db, 'products', productDoc.id);
-                transaction.update(productRef, { stock: increment(-saleCart[i].quantity) });
+                for (let i = 0; i < productDocs.length; i++) {
+                    const productDoc = productDocs[i];
+                    if (!productDoc.exists() || productDoc.data().stock < saleCart[i].quantity) {
+                        throw new Error(`Tồn kho không đủ cho "${saleCart[i].name}".`);
+                    }
+                }
+                const saleSubtotal = saleCart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+                const saleTax = saleSubtotal * 0.1;
+                const saleTotal = saleSubtotal + saleTax;
+                const salePointsUsed = parseCurrency(salePointsUsedStr);
+                let saleDiscountAmount = 0;
+                let finalCustomerData = null;
+                let pointsEarnedThisTransaction = 0;
+                if (saleCustomer && customerDoc && customerDoc.exists()) {
+                    const serverPoints = customerDoc.data().points || 0;
+                    const pointsUsedThisTransaction = Math.min(salePointsUsed, serverPoints);
+                    saleDiscountAmount = Math.min(pointsUsedThisTransaction * 1000, saleTotal);
+                    pointsEarnedThisTransaction = Math.floor(saleSubtotal / 10000);
+                    const finalCustomerPoints = serverPoints - pointsUsedThisTransaction + pointsEarnedThisTransaction;
+                    finalCustomerData = { ...saleCustomer, points: finalCustomerPoints };
+                }
+                const saleTotalAfterDiscount = saleTotal - saleDiscountAmount;
+                productDocs.forEach((productDoc, i) => {
+                    transaction.update(doc(db, 'products', productDoc.id), { stock: increment(-saleCart[i].quantity) });
+                });
+                if (finalCustomerData) {
+                    transaction.update(doc(db, 'customers', finalCustomerData.id), { points: finalCustomerData.points });
+                }
+                const billData = { items: saleCart, customer: finalCustomerData, subtotal: saleSubtotal, tax: saleTax, discountAmount: saleDiscountAmount, totalAfterDiscount: saleTotalAfterDiscount, paymentMethod, createdBy: user.email, createdAt: serverTimestamp(), pointsEarned: pointsEarnedThisTransaction, pointsUsed: finalCustomerData ? Math.min(salePointsUsed, saleCustomer.points || 0) : 0, storeInfo };
+                transaction.set(doc(collection(db, 'bills')), billData);
+                setLastReceiptData({ ...billData, createdAt: new Date(), customer: finalCustomerData, storeInfo });
             });
+            setShowReceiptModal(true);
+            resetTransaction();
+        } catch (error) { showToast(`Lỗi thanh toán: ${error.message}`); }
+    }, [user, storeInfo, resetTransaction, showToast]);
 
-            // Cập nhật điểm khách hàng
-            if (finalCustomerData) {
-                const customerRef = doc(db, 'customers', finalCustomerData.id);
-                transaction.update(customerRef, { points: finalCustomerData.points });
-            }
-
-            // Tạo hóa đơn mới
-            const billData = {
-                items: saleCart,
-                customer: finalCustomerData,
-                subtotal: saleSubtotal,
-                tax: saleTax,
-                discountAmount: saleDiscountAmount,
-                totalAfterDiscount: saleTotalAfterDiscount,
-                paymentMethod,
-                createdBy: user.email,
-                createdAt: serverTimestamp(),
-                pointsEarned: pointsEarnedThisTransaction,
-                pointsUsed: finalCustomerData ? Math.min(salePointsUsed, saleCustomer.points || 0) : 0,
-                storeInfo
-            };
-            const newBillRef = doc(collection(db, 'bills'));
-            transaction.set(newBillRef, billData);
-            
-            // Chuẩn bị dữ liệu cho hóa đơn
-            setLastReceiptData({ ...billData, createdAt: new Date(), customer: finalCustomerData, storeInfo });
-        });
-
-        // --- HÀNH ĐỘNG SAU KHI GIAO DỊCH THÀNH CÔNG ---
-        setShowReceiptModal(true);
-        resetTransaction();
-
-    } catch (error) {
-        showToast(`Lỗi thanh toán: ${error.message}`);
-    }
-}, [user, storeInfo, resetTransaction, showToast]);
-
-    // Đặt hàm này vào trong component PosSystemContent.js
-const handleCreatePayOSLink = async () => {
-    if (cart.length === 0) {
-        showToast("Giỏ hàng trống!");
-        return;
-    }
-
-    setIsQrModalOpen(true);
-    setPaymentLinkData(null); // Reset link cũ
-
-    const orderCode = Date.now();
-    const transactionRef = doc(db, 'transactions', String(orderCode));
-
-    try {
-        // 1. TẠO ĐƠN HÀNG TẠM TRÊN FIRESTORE
-        const pendingTransaction = {
-            status: 'PENDING',
-            orderCode: orderCode,
-            amount: Math.round(totalAfterDiscount),
-            createdAt: serverTimestamp(),
-            cart: cart,
-            customer: currentCustomer,
-            pointsToUse: pointsToUse,
-        };
-        await setDoc(transactionRef, pendingTransaction);
-
-        // 2. BẮT ĐẦU LẮNG NGHE THAY ĐỔI TRÊN ĐƠN HÀNG NÀY
-        const unsubscribe = onSnapshot(transactionRef, (docSnap) => {
-            const data = docSnap.data();
-            if (data && data.status === 'PAID') {
-                // THANH TOÁN THÀNH CÔNG!
-                setPaymentLinkData(prev => ({ ...prev, status: 'PAID' })); // Cập nhật UI thành "Thành công!"
-
-                // Gọi hàm lưu đơn hàng chính thức
-                finalizeSale(data.cart, data.customer, data.pointsToUse, 'qr');
-
-                // Tự động đóng popup sau 2.5 giây
-                setTimeout(() => {
-                    setIsQrModalOpen(false);
-                    unsubscribe(); // Dừng lắng nghe
-                }, 2500);
-
-            } else if (data && data.status === 'CANCELLED') {
-                setPaymentLinkData(prev => ({ ...prev, status: 'CANCELLED' }));
-                 setTimeout(() => {
-                    setIsQrModalOpen(false);
-                    unsubscribe();
-                }, 2500);
-            }
-        });
-
-        // 3. GỌI API ĐỂ LẤY LINK THANH TOÁN
-        const response = await fetch('/api/create-payment-link', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                orderCode: orderCode,
-                amount: Math.round(totalAfterDiscount),
-                description: `DH ${orderCode}`,
-            }),
-        });
-
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error);
-
-        // 4. HIỂN THỊ POPUP VỚI MÃ QR
-        setPaymentLinkData({ ...result.data, status: 'PENDING' });
-
-    } catch (error) {
-        console.error("Lỗi khi tạo giao dịch PayOS:", error);
-        showToast(`Lỗi: ${error.message}`);
-        setIsQrModalOpen(false);
-        // Nếu có lỗi, xóa đơn hàng tạm
-        await deleteDoc(transactionRef);
-    }
-};
+    const handleCreatePayOSLink = async () => {
+        if (cart.length === 0) { showToast("Giỏ hàng trống!"); return; }
+        setIsQrModalOpen(true);
+        setPaymentLinkData(null);
+        const orderCode = Date.now();
+        const transactionRef = doc(db, 'transactions', String(orderCode));
+        try {
+            const pendingTransaction = { status: 'PENDING', orderCode: orderCode, amount: Math.round(totalAfterDiscount), createdAt: serverTimestamp(), cart: cart, customer: currentCustomer, pointsToUse: pointsToUse };
+            await setDoc(transactionRef, pendingTransaction);
+            const unsubscribe = onSnapshot(transactionRef, (docSnap) => {
+                const data = docSnap.data();
+                if (data && data.status === 'PAID') {
+                    setPaymentLinkData(prev => ({ ...prev, status: 'PAID' }));
+                    finalizeSale(data.cart, data.customer, data.pointsToUse, 'qr');
+                    setTimeout(() => { setIsQrModalOpen(false); unsubscribe(); }, 2500);
+                } else if (data && data.status === 'CANCELLED') {
+                    setPaymentLinkData(prev => ({ ...prev, status: 'CANCELLED' }));
+                    setTimeout(() => { setIsQrModalOpen(false); unsubscribe(); }, 2500);
+                }
+            });
+            const response = await fetch('/api/create-payment-link', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ orderCode: orderCode, amount: Math.round(totalAfterDiscount), description: `DH ${orderCode}` }),
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error);
+            setPaymentLinkData({ ...result.data, status: 'PENDING' });
+        } catch (error) { showToast(`Lỗi: ${error.message}`); setIsQrModalOpen(false); await deleteDoc(transactionRef); }
+    };
 
     const initiateCheckout = () => {
         if (activePaymentMethod === 'cash') {
@@ -500,13 +473,9 @@ const handleCreatePayOSLink = async () => {
                     </div>
                     <div className="p-4 mt-auto bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-700">
                         <div className="grid grid-cols-2 gap-3 mb-3">
-    <button onClick={() => setActivePaymentMethod('cash')} className={`btn-payment ${activePaymentMethod === 'cash' ? 'active' : ''}`}>
-        <Wallet size={18}/>Tiền mặt
-    </button>
-    <button onClick={() => setActivePaymentMethod('qr')} className={`btn-payment ${activePaymentMethod === 'qr' ? 'active' : ''}`}>
-        <QrCode size={18}/>Quét mã QR
-    </button>
-</div>
+                            <button onClick={() => setActivePaymentMethod('cash')} className={`btn-payment ${activePaymentMethod === 'cash' ? 'active' : ''}`}><Wallet size={18}/>Tiền mặt</button>
+                            <button onClick={() => setActivePaymentMethod('qr')} className={`btn-payment ${activePaymentMethod === 'qr' ? 'active' : ''}`}><QrCode size={18}/>Quét mã QR</button>
+                        </div>
                         <div className="flex gap-3 mb-3"><button onClick={handleHoldBill} disabled={cart.length === 0} className="flex-1 btn-action-outline bg-amber-500/10 border-amber-500 text-amber-600 hover:bg-amber-500/20 disabled:opacity-50"><PauseCircle size={18}/>Giữ hóa đơn</button></div>
                         <button id="payment-button" onClick={initiateCheckout} disabled={cart.length === 0} className="w-full bg-indigo-600 text-white font-bold text-lg py-4 rounded-xl hover:bg-indigo-700 disabled:bg-slate-400"><div className="flex items-center justify-center gap-3"><CheckCircle size={20}/><span>THANH TOÁN (F9)</span></div></button>
                     </div>
@@ -518,13 +487,7 @@ const handleCreatePayOSLink = async () => {
             <ProductLookupModal show={showProductLookup} onClose={() => setShowProductLookup(false)} products={allProducts} onProductSelect={handleAddToCart} />
             <CustomerModal show={showCustomerModal} onClose={() => setShowCustomerModal(false)} customers={customers} onSelectCustomer={setCurrentCustomer} onAddNewCustomer={handleAddNewCustomer} />
             <ReceiptModal show={showReceiptModal} onClose={() => { setShowReceiptModal(false); setLastReceiptData(null); }} data={lastReceiptData} />
-<QrPaymentModal 
-     isOpen={isQrModalOpen} 
-     onClose={() => setIsQrModalOpen(false)}
-     amount={totalAfterDiscount}
-     checkoutUrl={paymentLinkData?.checkoutUrl}
-     qrCode={paymentLinkData?.qrCode}
-     status={paymentLinkData?.status || 'LOADING'} 
- />        </>
+            <QrPaymentModal isOpen={isQrModalOpen} onClose={() => setIsQrModalOpen(false)} amount={totalAfterDiscount} checkoutUrl={paymentLinkData?.checkoutUrl} qrCode={paymentLinkData?.qrCode} status={paymentLinkData?.status || 'LOADING'} />
+        </>
     );
 }

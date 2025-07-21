@@ -1,10 +1,11 @@
 import PayOS from "@payos/node";
 
-const payos = new PayOS(
-  process.env.PAYOS_CLIENT_ID,
-  process.env.PAYOS_API_KEY,
-  process.env.PAYOS_CHECKSUM_KEY
-);
+// Khởi tạo PayOS ĐÚNG CÁCH (dạng object)
+const payos = new PayOS({
+  clientId: process.env.PAYOS_CLIENT_ID,
+  apiKey: process.env.PAYOS_API_KEY,
+  checksumKey: process.env.PAYOS_CHECKSUM_KEY,
+});
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -22,14 +23,19 @@ export default async function handler(req, res) {
       orderCode: orderCode,
       amount: amount,
       description: description,
-      cancelUrl: `${process.env.NEXT_PUBLIC_BASE_URL}`, // Link quay về khi hủy
-      returnUrl: `${process.env.NEXT_PUBLIC_BASE_URL}`, // Link quay về khi thành công
+      // Sử dụng NEXT_PUBLIC_BASE_URL của bạn. Đảm bảo nó được định nghĩa đúng trong .env.
+      // Nếu bạn muốn người dùng ở lại trang chủ sau khi thanh toán, đây là đúng.
+      cancelUrl: `${process.env.NEXT_PUBLIC_BASE_URL}`,
+      returnUrl: `${process.env.NEXT_PUBLIC_BASE_URL}`,
+      // Bạn có thể thêm items, buyerName, buyerEmail, v.v. nếu cần
     };
 
+    // Gọi phương thức tạo link thanh toán
     const paymentLink = await payos.createPaymentLink(paymentData);
-    
+
+    // Trả về dữ liệu cần thiết cho Frontend
     res.status(200).json({
-      error: 0,
+      error: 0, // Dùng error: 0 cho thành công là một convention tốt
       message: 'Success',
       data: {
         bin: paymentLink.bin,

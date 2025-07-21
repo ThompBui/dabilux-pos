@@ -26,6 +26,7 @@ import {
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import ProductSkeleton from './ProductSkeleton';
+import { usePayOS, PayOSConfig } from '@payos/payos-checkout';
 
 // --- CÁC HÀM HỖ TRỢ & COMPONENT CON ---
 const formatCurrency = (amount) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount || 0);
@@ -129,7 +130,7 @@ export default function PosSystemContent() {
     const [dismissedNotifications, setDismissedNotifications] = useState([]);
     const [isQrModalOpen, setIsQrModalOpen] = useState(false);
     const [paymentLinkData, setPaymentLinkData] = useState(null);
-    
+    const [payosStatus, setPayosStatus] = useState('INIT');
     const showToast = useCallback((message) => {
         setToast({ show: true, message });
         setTimeout(() => setToast({ show: false, message: '' }), 3000);
@@ -332,77 +333,125 @@ export default function PosSystemContent() {
         } catch (error) { showToast(`Lỗi thanh toán: ${error.message}`); }
     }, [user, storeInfo, resetTransaction, showToast]);
 
-    const handleCreatePayOSLink = async () => {
-    if (cart.length === 0) {
-        showToast("Giỏ hàng trống!");
-        return;
-    }
+     const handleCreatePayOSLink = async () => {
+        if (cart.length === 0) {
+            showToast("Giỏ hàng trống!");
+            return;
+        }
 
-    setIsQrModalOpen(true);
-    setPaymentLinkData(null); 
+        // 🚨 QUẢN LÝ TRẠNG THÁI MODAL VÀ PAYOS 🚨
+        setIsQrModalOpen(true); // Mở modal để người dùng thấy trạng thái chờ
+        setPaymentLinkData(null); // Reset dữ liệu thanh toán cũ
+        setPayosStatus('LOADING'); // Đặt trạng thái ban đầu là đang tải
 
-    const orderCode = Date.now();
-    const transactionRef = doc(db, 'transactions', String(orderCode));
+        const orderCode = Date.now(); // Tạo mã đơn hàng duy nhất
+        const transactionRef = doc(db, 'transactions', String(orderCode)); // Tham chiếu đến đơn hàng trong Firebase
 
-    try {
-        // 1. TẠO ĐƠN HÀNG TẠM VỚI ĐẦY ĐỦ THÔNG TIN
-        const pendingTransaction = {
-            status: 'PENDING',
-            orderCode: orderCode,
-            amount: Math.round(totalAfterDiscount),
-            createdAt: serverTimestamp(),
-            cart: cart,
-            customer: currentCustomer,
-            pointsToUse: pointsToUse,
-            // DÒNG QUAN TRỌNG BỊ THIẾU ĐÃ ĐƯỢC BỔ SUNG
-            createdBy: { uid: user.uid, email: user.email }, 
-        };
-        await setDoc(transactionRef, pendingTransaction);
-
-        // 2. BẮT ĐẦU LẮNG NGHE
-        const unsubscribe = onSnapshot(transactionRef, (docSnap) => {
-            const data = docSnap.data();
-            if (data && data.status === 'PAID') {
-                unsubscribe();
-                setPaymentLinkData(prev => ({ ...prev, status: 'PAID' }));
-                setTimeout(() => {
-                    finalizeSale(data.cart, data.customer, data.pointsToUse, 'qr');
-                    setIsQrModalOpen(false);
-                }, 2000);
-
-            } else if (data && data.status === 'CANCELLED') {
-                unsubscribe();
-                setPaymentLinkData(prev => ({ ...prev, status: 'CANCELLED' }));
-                 setTimeout(() => {
-                    setIsQrModalOpen(false);
-                }, 2500);
-            }
-        });
-
-        // 3. GỌI API ĐỂ LẤY LINK THANH TOÁN
-        const response = await fetch('/api/create-payment-link', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+        try {
+            // 1. TẠO ĐƠN HÀNG PENDING TRONG FIRESTORE
+            const pendingTransaction = {
+                status: 'PENDING',
                 orderCode: orderCode,
                 amount: Math.round(totalAfterDiscount),
-                description: `DH ${orderCode}`,
-            }),
-        });
+                createdAt: serverTimestamp(),
+                cart: cart,
+                customer: currentCustomer,
+                pointsToUse: pointsToUse,
+                createdBy: { uid: user.uid, email: user.email },
+            };
+            await setDoc(transactionRef, pendingTransaction);
 
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error);
-        
-        setPaymentLinkData({ ...result.data, status: 'PENDING' });
+            // 2. BẮT ĐẦU LẮNG NGHE SỰ THAY ĐỔI TRẠNG THÁI CỦA ĐƠN HÀNG TỪ FIRESTORE (DO WEBHOOK CẬP NHẬT)
+            const unsubscribe = onSnapshot(transactionRef, (docSnap) => {
+                const data = docSnap.data();
+                if (data && data.status === 'PAID') {
+                    unsubscribe(); // Ngừng lắng nghe khi đã PAID
+                    setPayosStatus('PAID'); // Cập nhật trạng thái PayOS thành PAID
+                    // Sau khi trạng thái là PAID (từ webhook), gọi finalizeSale
+                    setTimeout(() => {
+                        finalizeSale(data.cart, data.customer, data.pointsToUse, 'qr');
+                        setIsQrModalOpen(false); // Đóng modal QR
+                        showToast("Thanh toán thành công!"); // Thông báo thành công
+                    }, 1500); // Đợi một chút để người dùng thấy trạng thái
+                } else if (data && data.status === 'CANCELLED') {
+                    unsubscribe(); // Ngừng lắng nghe khi đã CANCELLED
+                    setPayosStatus('CANCELLED'); // Cập nhật trạng thái PayOS thành CANCELLED
+                    setTimeout(() => {
+                        setIsQrModalOpen(false); // Đóng modal QR
+                        showToast("Thanh toán đã bị hủy hoặc thất bại."); // Thông báo thất bại
+                    }, 2000);
+                }
+            });
 
-    } catch (error) {
-        console.error("Lỗi khi tạo giao dịch PayOS:", error);
-        showToast(`Lỗi: ${error.message}`);
-        setIsQrModalOpen(false);
-        await deleteDoc(transactionRef);
-    }
-};
+            // 3. GỌI API BACKEND ĐỂ LẤY LINK THANH TOÁN
+            const response = await fetch('/api/create-payos-payment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    orderCode: orderCode,
+                    amount: Math.round(totalAfterDiscount),
+                    description: `DH ${orderCode} (POS)`,
+                }),
+            });
 
+            const result = await response.json();
+            if (!response.ok || result.error) {
+                throw new Error(result.error || "Không thể lấy link thanh toán từ PayOS");
+            }
+
+            // 🚨 QUAN TRỌNG: Thiết lập paymentLinkData và thay đổi trạng thái để kích hoạt useEffect mở pop-up 🚨
+            setPaymentLinkData({ ...result.data, status: 'PENDING' }); // Lưu link và QR code
+            setPayosStatus('OPENING_POPUP'); // Đặt trạng thái để useEffect ở trên mở pop-up
+
+        } catch (error) {
+            console.error("Lỗi khi tạo giao dịch PayOS:", error);
+            showToast(`Lỗi thanh toán QR: ${error.message}`);
+            setIsQrModalOpen(false); // Đóng modal nếu có lỗi
+            // Xóa giao dịch pending nếu không tạo được link thành công
+            await deleteDoc(transactionRef).catch(e => console.error("Lỗi xóa transaction pending:", e));
+            setPayosStatus('ERROR'); // Cập nhật trạng thái lỗi
+        }
+    };
+ useEffect(() => {
+        // Điều kiện:
+        // 1. payosStatus đang ở trạng thái chuẩn bị mở pop-up ('OPENING_POPUP')
+        // 2. paymentLinkData có checkoutUrl
+        // 3. payOSConfig đã được tạo (không phải null)
+        if (payosStatus === 'OPENING_POPUP' && paymentLinkData?.checkoutUrl && payOSConfig) {
+            openPayOSPopup(); // Gọi hàm mở pop-up của PayOS
+            setPayosStatus('OPENED'); // Cập nhật trạng thái đã mở
+        }
+    }, [payosStatus, paymentLinkData?.checkoutUrl, openPayOSPopup, payOSConfig]);
+ const payOSConfig = useMemo(() => {
+        // Chỉ tạo config khi có checkoutUrl. Nếu không, trả về null.
+        if (!paymentLinkData?.checkoutUrl) return null;
+
+        return {
+            RETURN_URL: window.location.origin + router.pathname, // <-- QUAN TRỌNG: Trở về chính trang hiện tại
+            // ELEMENT_ID không cần thiết khi dùng embedded: false (dạng pop-up)
+            CHECKOUT_URL: paymentLinkData.checkoutUrl, // URL thanh toán lấy từ Backend
+            embedded: false, // <-- QUAN TRỌNG: ĐẶT LÀ FALSE ĐỂ HIỂN THỊ DẠNG POP-UP
+            onSuccess: (event) => {
+                console.log('PayOS onSuccess Callback (Frontend):', event);
+                setPayosStatus('PAID'); // Cập nhật UI ngay lập tức
+                // Logic hoàn tất giao dịch (finalizeSale) sẽ được kích hoạt bởi onSnapshot
+                // từ Firebase khi webhook cập nhật trạng thái PAID.
+            },
+            onCancel: (event) => {
+                console.log('PayOS onCancel Callback (Frontend):', event);
+                setPayosStatus('CANCELLED'); // Cập nhật UI ngay lập tức
+                // Logic hủy (transactionRef updated) sẽ được kích hoạt bởi onSnapshot.
+            },
+            onExit: (event) => {
+                console.log('PayOS onExit Callback (Frontend):', event);
+                setPayosStatus('EXIT'); // Cập nhật UI ngay lập tức (người dùng đóng pop-up)
+                // Quan trọng: Sự kiện onExit không đảm bảo giao dịch đã hủy.
+                // Luôn dựa vào Webhook (onSnapshot) để xác nhận trạng thái cuối cùng.
+            },
+        };
+    }, [paymentLinkData?.checkoutUrl, router.pathname]); 
+
+     const { open: openPayOSPopup, exit: exitPayOSPopup } = usePayOS(payOSConfig || {});
     const initiateCheckout = () => {
         if (activePaymentMethod === 'cash') {
             if (totalAfterDiscount > 0 && (parseCurrency(cashReceived) < totalAfterDiscount)) {

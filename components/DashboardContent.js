@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Sidebar from './Sidebar';
 import { collection, query, onSnapshot, orderBy, where } from 'firebase/firestore';
-import { db, auth } from '../firebase';
+import { auth, db } from '../lib/firebase-client';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
@@ -55,10 +55,16 @@ const StatCard = ({ title, value, icon, iconBgColor }) => (
     </div>
 );
 
-
+if (loading) {
+  return (
+    <div className="flex items-center justify-center h-screen">
+      <p>Đang tải dữ liệu...</p>
+    </div>
+  );
+}
 // --- COMPONENT CHÍNH ---
 export default function DashboardContent() {
-    const [user, authLoading] = useAuthState(auth);
+const [user, loading] = useAuthState(auth);
     const router = useRouter();
 
     const [allBills, setAllBills] = useState([]);

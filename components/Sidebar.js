@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link'; // BƯỚC 1: Import Link
 import { useRouter } from 'next/router';
-import { auth } from '../firebase';
+import { auth } from '../lib/firebase-client';
 import {
     Home, BarChart2, Settings, Users, ShoppingBag, FileText, LogOut, Box, ShoppingCart,
     Headset, X

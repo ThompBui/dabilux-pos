@@ -10,12 +10,13 @@
     "export": "next export"
   },
   "dependencies": {
+    "@payos/node": "^1.0.10",
     "autoprefixer": "^10.4.21",
     "date-fns": "^4.1.0",
     "firebase": "^10.12.3",
     "lucide-react": "^0.395.0",
     "next": "14.2.30",
-    "qrcode": "^1.5.3",
+    "qrcode": "^1.5.4",
     "react": "^18",
     "react-day-picker": "^9.8.0",
     "react-dom": "^18",

@@ -13,22 +13,21 @@ export default async function handler(req, res) {
   }
 
   const { orderCode, amount, description } = req.body;
-
+const paymentDescription = description || `DH ${orderCode}`;
   if (!orderCode || !amount || !description) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
   try {
     const paymentData = {
-      orderCode: orderCode,
-      amount: amount,
-      description: description,
-      // Sử dụng NEXT_PUBLIC_BASE_URL của bạn. Đảm bảo nó được định nghĩa đúng trong .env.
-      // Nếu bạn muốn người dùng ở lại trang chủ sau khi thanh toán, đây là đúng.
-      cancelUrl: `${process.env.NEXT_PUBLIC_BASE_URL}`,
-      returnUrl: `${process.env.NEXT_PUBLIC_BASE_URL}`,
-      // Bạn có thể thêm items, buyerName, buyerEmail, v.v. nếu cần
-    };
+  orderCode: orderCode,
+  amount: amount,
+  description: paymentDescription,
+  cancelUrl: `${process.env.NEXT_PUBLIC_BASE_URL}`,
+  returnUrl: `${process.env.NEXT_PUBLIC_BASE_URL}`,
+  // 🚨 Đảm bảo 'items' luôn là một mảng, ngay cả khi rỗng 🚨
+  items: req.body.items || [], // Nếu req.body.items là undefined, nó sẽ là []
+};
 
     // Gọi phương thức tạo link thanh toán
     const paymentLink = await payos.createPaymentLink(paymentData);

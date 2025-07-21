@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { auth, db } from '../firebase';
+import { db, auth } from '../lib/firebase-client';
 import {
   collection,
   addDoc,
@@ -413,86 +413,107 @@ export default function PosSystemContent() {
         } catch (error) { showToast(`Lỗi thanh toán: ${error.message}`); }
     }, [user, storeInfo, resetTransaction, showToast]);
 
-    const handleCreatePayOSLink = async () => {
-        if (cart.length === 0) { showToast("Giỏ hàng trống!"); return; }
-        setIsQrModalOpen(true);
-        setPaymentLinkData(null);
-        setPayosStatus('LOADING');
-        const orderCode = Date.now();
-        const transactionRef = doc(db, 'transactions', String(orderCode));
+    // Tìm đến hàm handleCreatePayOSLink và thay thế toàn bộ bằng code này.
 
-        try {
-            const pendingTransaction = {
-                status: 'PENDING',
+const handleCreatePayOSLink = async () => {
+    if (cart.length === 0) { 
+        showToast("Giỏ hàng trống!"); 
+        return; 
+    }
+    
+    setIsQrModalOpen(true);
+    setPaymentLinkData(null);
+    setPayosStatus('LOADING');
+    const orderCode = Date.now();
+    const transactionRef = doc(db, 'transactions', String(orderCode));
+
+    // --- BẮT ĐẦU ĐOẠN CODE DEBUG ---
+    try {
+        const pendingTransaction = {
+            status: 'PENDING',
+            orderCode: orderCode,
+            amount: Math.round(totalAfterDiscount),
+            createdAt: serverTimestamp(),
+            cart: cart,
+            customer: currentCustomer,
+            pointsToUse: pointsToUse,
+            createdBy: { uid: user.uid, email: user.email },
+        };
+
+        console.log("CLIENT: Chuẩn bị tạo transaction PENDING với ID:", orderCode);
+        await setDoc(transactionRef, pendingTransaction);
+        console.log("CLIENT: TẠO transaction PENDING thành công!");
+
+    } catch (error) {
+        console.error("CLIENT: LỖI NGHIÊM TRỌNG KHI TẠO TRANSACTION!", error);
+        alert(`Lỗi khi tạo giao dịch trên Firestore: ${error.message}. Vui lòng kiểm tra lại Security Rules.`);
+        
+        // Dừng quá trình nếu không tạo được document
+        setIsQrModalOpen(false);
+        setPayosStatus('ERROR');
+        return; 
+    }
+    // --- KẾT THÚC ĐOẠN CODE DEBUG ---
+
+    // Đoạn code lắng nghe và gọi API vẫn giữ nguyên
+    const unsubscribe = onSnapshot(transactionRef, (docSnap) => {
+        const data = docSnap.data();
+        if (data && data.status === 'PAID') {
+            unsubscribe();
+            setPayosStatus('PAID');
+            setTimeout(() => {
+                finalizeSale(data.cart, data.customer, data.pointsToUse, 'qr');
+                setIsQrModalOpen(false);
+                showToast("Thanh toán thành công!");
+            }, 1500);
+        } else if (data && data.status === 'CANCELLED') {
+            unsubscribe();
+            setPayosStatus('CANCELLED');
+            setTimeout(() => {
+                setIsQrModalOpen(false);
+                showToast("Thanh toán đã bị hủy hoặc thất bại.");
+            }, 2000);
+        }
+    }, (error) => {
+        console.error("Lỗi lắng nghe transaction Firebase:", error);
+        setPayosStatus('ERROR');
+        showToast("Lỗi kết nối Firebase, vui lòng thử lại.");
+        setIsQrModalOpen(false);
+    });
+    
+    try {
+        const response = await fetch('/api/create-payment-link', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
                 orderCode: orderCode,
                 amount: Math.round(totalAfterDiscount),
-                createdAt: serverTimestamp(),
-                cart: cart,
-                customer: currentCustomer,
-                pointsToUse: pointsToUse,
-                createdBy: { uid: user.uid, email: user.email },
-            };
-            await setDoc(transactionRef, pendingTransaction);
+                description: `DH ${orderCode} (POS)`,
+                items: cart.map(item => ({
+                    name: item.name,
+                    quantity: item.quantity,
+                    price: item.price
+                }))
+            }),
+        });
 
-            const unsubscribe = onSnapshot(transactionRef, (docSnap) => {
-                const data = docSnap.data();
-                if (data && data.status === 'PAID') {
-                    unsubscribe();
-                    setPayosStatus('PAID');
-                    setTimeout(() => {
-                        finalizeSale(data.cart, data.customer, data.pointsToUse, 'qr');
-                        setIsQrModalOpen(false);
-                        showToast("Thanh toán thành công!");
-                    }, 1500);
-                } else if (data && data.status === 'CANCELLED') {
-                    unsubscribe();
-                    setPayosStatus('CANCELLED');
-                    setTimeout(() => {
-                        setIsQrModalOpen(false);
-                        showToast("Thanh toán đã bị hủy hoặc thất bại.");
-                    }, 2000);
-                }
-            }, (error) => {
-                console.error("Lỗi lắng nghe transaction Firebase:", error);
-                setPayosStatus('ERROR');
-                showToast("Lỗi kết nối Firebase, vui lòng thử lại.");
-                setIsQrModalOpen(false);
-            });
-
-            const response = await fetch('/api/create-payment-link', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-        orderCode: orderCode,
-        amount: Math.round(totalAfterDiscount),
-        description: `DH ${orderCode} (POS)`,
-        // ---- SỬA Ở ĐÂY ----
-        // Thêm dòng này để gửi thông tin giỏ hàng
-        items: cart.map(item => ({
-            name: item.name,
-            quantity: item.quantity,
-            price: item.price
-        }))
-        // ------------------
-    }),
-});
-
-            const result = await response.json();
-            if (!response.ok || result.error) {
-                throw new Error(result.details || "Không thể lấy link thanh toán từ PayOS");
-            }
-
-            setPaymentLinkData(result.data);
-            setPayosStatus('OPENING_POPUP');
-
-        } catch (error) {
-            console.error("Lỗi khi tạo giao dịch PayOS:", error);
-            showToast(`Lỗi thanh toán QR: ${error.message}`);
-            setIsQrModalOpen(false);
-            await deleteDoc(transactionRef).catch(e => console.error("Lỗi xóa transaction pending:", e));
-            setPayosStatus('ERROR');
+        const result = await response.json();
+        if (!response.ok || result.error) {
+            throw new Error(result.details || "Không thể lấy link thanh toán từ PayOS");
         }
-    };
+
+        setPaymentLinkData(result.data);
+        setPayosStatus('OPENED'); // Thay đổi trạng thái để hiển thị QR
+
+    } catch (error) {
+        console.error("Lỗi khi tạo giao dịch PayOS:", error);
+        showToast(`Lỗi thanh toán QR: ${error.message}`);
+        setIsQrModalOpen(false);
+        // Cân nhắc xóa transaction PENDING nếu có lỗi
+        await deleteDoc(transactionRef).catch(e => console.error("Lỗi xóa transaction pending:", e));
+        setPayosStatus('ERROR');
+    }
+};
 
     const initiateCheckout = () => {
         if (activePaymentMethod === 'cash') {

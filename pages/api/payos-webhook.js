@@ -1,53 +1,47 @@
 import PayOS from "@payos/node";
-import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "../../firebase"; // Hãy chắc chắn đường dẫn này đúng tới file firebase.js của bạn
-
-// SỬA LỖI DỨT ĐIỂM: Khởi tạo PayOS bằng một OBJECT chứa các key
-const payos = new PayOS({
-  clientId: process.env.PAYOS_CLIENT_ID,
-  apiKey: process.env.PAYOS_API_KEY,
-  checksumKey: process.env.PAYOS_CHECKSUM_KEY,
-});
+import admin from 'firebase-admin'; // Import admin để dùng các hàm đặc biệt
+import { db_server } from '../../lib/firebase-admin';
+const payos = new PayOS(process.env.PAYOS_CLIENT_ID, process.env.PAYOS_API_KEY, process.env.PAYOS_CHECKSUM_KEY);
 
 export default async function handler(req, res) {
-  // Chỉ chấp nhận phương thức POST
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
   const webhookData = req.body;
-
+console.log("\n\n--- NHẬN ĐƯỢC DỮ LIỆU WEBHOOK ---");
+console.log("Data nhận được:", JSON.stringify(webhookData, null, 2));
+console.log("---------------------------------\n\n");
   try {
-    // 1. Xác thực dữ liệu từ PayOS gửi qua
+    console.log("Đang xác thực Webhook...");
     const verifiedData = payos.verifyPaymentWebhookData(webhookData);
+    console.log("Webhook đã được xác thực thành công:", verifiedData);
 
-    // Nếu xác thực thành công, verifiedData sẽ chứa thông tin giao dịch
-    if (verifiedData) {
-      console.log('Webhook đã được xác thực thành công:', verifiedData);
-
-      // 2. Lấy orderCode từ dữ liệu đã xác thực
+    if (verifiedData.code === '00') {
       const orderCode = verifiedData.orderCode;
-
-      // 3. Cập nhật trạng thái đơn hàng trong Firestore
-      const transactionRef = doc(db, 'transactions', String(orderCode));
-      await updateDoc(transactionRef, {
-        status: 'PAID', // Cập nhật trạng thái
-        webhookReceivedAt: serverTimestamp(), // Ghi lại thời gian nhận webhook
-        payosData: verifiedData, // Lưu lại toàn bộ dữ liệu từ PayOS để đối soát
+      
+      console.log(`Giao dịch ${orderCode} thành công. Bắt đầu cập nhật Firestore...`);
+      
+      // Sử dụng `db_server` để có quyền ghi vào DB từ server
+      const transactionRef = db_server.collection('transactions').doc(String(orderCode));
+      
+      // Dùng cú pháp của Admin SDK để cập nhật
+      await transactionRef.update({
+        status: 'PAID',
+        webhookReceivedAt: admin.firestore.FieldValue.serverTimestamp(),
+        payosData: verifiedData,
       });
       
-      console.log(`Giao dịch ${orderCode} đã được cập nhật thành PAID.`);
-
-      // 4. Phản hồi thành công cho PayOS
-      return res.status(200).json({ success: true, message: 'Webhook received and processed.' });
+      console.log(`Cập nhật Firestore cho giao dịch ${orderCode} thành công.`);
+    } else {
+      console.log(`Webhook nhận được nhưng giao dịch chưa thành công. Code: ${verifiedData.code}`);
     }
+
+    return res.status(200).json({ success: true, message: 'Webhook received and processed.' });
+
   } catch (error) {
     console.error('Xác thực Webhook thất bại hoặc có lỗi xử lý:', error);
-    // Nếu xác thực thất bại, trả về lỗi 400
-    return res.status(400).json({ error: 'Webhook verification failed.' });
+    return res.status(400).json({ error: 'Webhook verification failed or processing error.' });
   }
-  
-  // Trường hợp dữ liệu không hợp lệ mà không gây ra lỗi
-  return res.status(400).json({ error: 'Invalid data.' });
 }

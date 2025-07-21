@@ -26,9 +26,11 @@ import {
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import ProductSkeleton from './ProductSkeleton';
+
+// 🚨 ĐẢM BẢO CÓ DÒNG NÀY 🚨
 import { usePayOS, PayOSConfig } from '@payos/payos-checkout';
 
-// --- CÁC HÀM HỖ TRỢ & COMPONENT CON ---
+// --- CÁC HÀM HỖ TRỢ & COMPONENT CON (GIỮ NGUYÊN) ---
 const formatCurrency = (amount) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount || 0);
 const parseCurrency = (string) => parseFloat(String(string).replace(/[^\d]/g, '')) || 0;
 
@@ -99,14 +101,17 @@ const Toast = ({ message, show }) => (
     </div>
 );
 
+
+// --- START: POSSystemContent Component ---
 export default function PosSystemContent() {
     const [user, authLoading] = useAuthState(auth);
     const router = useRouter();
-    
+
+    // --- STATES ---
     const [allProducts, setAllProducts] = useState([]);
     const [customers, setCustomers] = useState([]);
     const [storeInfo, setStoreInfo] = useState({ name: 'BuiAnh POS', logoUrl: '' });
-    
+
     const [dataLoading, setDataLoading] = useState(true);
 
     const [theme, setTheme] = useState('light');
@@ -118,7 +123,7 @@ export default function PosSystemContent() {
     const [cashReceived, setCashReceived] = useState('');
     const [pointsToUse, setPointsToUse] = useState('');
     const [activeCategory, setActiveCategory] = useState('all');
-    
+
     const [showCustomerModal, setShowCustomerModal] = useState(false);
     const [showCalculator, setShowCalculator] = useState(false);
     const [showProductLookup, setShowProductLookup] = useState(false);
@@ -130,19 +135,59 @@ export default function PosSystemContent() {
     const [dismissedNotifications, setDismissedNotifications] = useState([]);
     const [isQrModalOpen, setIsQrModalOpen] = useState(false);
     const [paymentLinkData, setPaymentLinkData] = useState(null);
-    const [payosStatus, setPayosStatus] = useState('INIT');
+
+    // 🚨 STATE MỚI CHO TRẠNG THÁI THANH TOÁN PAYOS 🚨
+    const [payosStatus, setPayosStatus] = useState('INIT'); // 'INIT', 'LOADING', 'OPENING_POPUP', 'OPENED', 'PAID', 'CANCELLED', 'EXIT', 'ERROR'
+
+
+    // --- HÀM HỖ TRỢ & CALLBACKS ---
     const showToast = useCallback((message) => {
         setToast({ show: true, message });
         setTimeout(() => setToast({ show: false, message: '' }), 3000);
     }, []);
 
+    const resetTransaction = useCallback(() => { setCart([]); setCurrentCustomer(null); setCashReceived(''); setPointsToUse(''); }, [setCart, setCurrentCustomer]);
+
+    // 🚨 ĐỊNH NGHĨA useMemo cho payOSConfig TRƯỚC usePayOS 🚨
+    const payOSConfig = useMemo(() => {
+        if (!paymentLinkData?.checkoutUrl) return null; // Chỉ tạo config khi có checkoutUrl
+
+        return {
+            RETURN_URL: window.location.origin + router.pathname, // <-- QUAN TRỌNG: Trở về chính trang hiện tại
+            CHECKOUT_URL: paymentLinkData.checkoutUrl, // URL thanh toán lấy từ Backend
+            embedded: false, // <-- QUAN TRỌNG: ĐẶT LÀ FALSE ĐỂ HIỂN THỊ DẠNG POP-UP
+            onSuccess: (event) => {
+                console.log('PayOS onSuccess Callback (Frontend):', event);
+                setPayosStatus('PAID'); // Cập nhật UI ngay lập tức
+                // Logic hoàn tất giao dịch (finalizeSale) sẽ được kích hoạt bởi onSnapshot
+                // từ Firebase khi webhook cập nhật trạng thái PAID.
+            },
+            onCancel: (event) => {
+                console.log('PayOS onCancel Callback (Frontend):', event);
+                setPayosStatus('CANCELLED'); // Cập nhật UI ngay lập tức
+                // Logic hủy (transactionRef updated) sẽ được kích hoạt bởi onSnapshot.
+            },
+            onExit: (event) => {
+                console.log('PayOS onExit Callback (Frontend):', event);
+                setPayosStatus('EXIT'); // Cập nhật UI ngay lập tức (người dùng đóng pop-up)
+                // Quan trọng: Sự kiện onExit không đảm bảo giao dịch đã hủy.
+                // Luôn dựa vào Webhook (onSnapshot) để xác nhận trạng thái cuối cùng.
+            },
+        };
+    }, [paymentLinkData?.checkoutUrl, router.pathname]); // Dependencies: chỉ tạo lại khi checkoutUrl hoặc pathname thay đổi
+
+    // 🚨 GỌI HOOK usePayOS NGAY SAU KHI payOSConfig ĐƯỢC ĐỊNH NGHĨA 🚨
+    const { open: openPayOSPopup, exit: exitPayOSPopup } = usePayOS(payOSConfig || {}); // Truyền config, nếu null thì truyền object rỗng để tránh lỗi
+
+
+    // --- USE EFFECTS (THỨ TỰ CÁC useEffect KHÔNG QUAN TRỌNG VỀ ĐỊNH NGHĨA, NHƯNG LẠI QUAN TRỌNG VỚI openPayOSPopup) ---
     useEffect(() => {
         const root = window.document.documentElement;
         const savedTheme = localStorage.getItem('theme') || 'light';
         setTheme(savedTheme);
         root.classList.toggle('dark', savedTheme === 'dark');
     }, []);
-    
+
     useEffect(() => {
         const root = window.document.documentElement;
         root.classList.toggle('dark', theme === 'dark');
@@ -162,7 +207,7 @@ export default function PosSystemContent() {
         });
         return () => { unsubCustomers(); unsubStoreInfo(); unsubProducts(); };
     }, [user]);
-    
+
     const activeProducts = useMemo(() => allProducts.filter(p => p.isActive !== false), [allProducts]);
     const filteredProducts = useMemo(() => {
         if (activeCategory === 'all') return activeProducts;
@@ -173,7 +218,7 @@ export default function PosSystemContent() {
         const lowStock = allProducts.filter(p => p.stock !== undefined && p.stock <= 10 && p.isActive !== false);
         setLowStockProducts(lowStock);
     }, [allProducts]);
-    
+
     useEffect(() => {
         const dismissed = localStorage.getItem('dismissedLowStockAlerts');
         if (dismissed) setDismissedNotifications(JSON.parse(dismissed));
@@ -207,8 +252,21 @@ export default function PosSystemContent() {
         return received > totalAfterDiscount ? received - totalAfterDiscount : 0;
     }, [cashReceived, totalAfterDiscount]);
 
-    const resetTransaction = useCallback(() => { setCart([]); setCurrentCustomer(null); setCashReceived(''); setPointsToUse(''); }, [setCart, setCurrentCustomer]);
-    
+
+    // 🚨 USEEFFECT NÀY PHẢI SAU KHI usePayOS ĐƯỢC GỌI 🚨
+    useEffect(() => {
+        // Điều kiện:
+        // 1. payosStatus đang ở trạng thái chuẩn bị mở pop-up ('OPENING_POPUP')
+        // 2. paymentLinkData có checkoutUrl
+        // 3. payOSConfig đã được tạo (không phải null)
+        if (payosStatus === 'OPENING_POPUP' && paymentLinkData?.checkoutUrl && payOSConfig) {
+            openPayOSPopup(); // Gọi hàm mở pop-up của PayOS
+            setPayosStatus('OPENED'); // Cập nhật trạng thái đã mở
+        }
+    }, [payosStatus, paymentLinkData?.checkoutUrl, openPayOSPopup, payOSConfig]);
+
+
+    // --- HÀM XỬ LÝ (CALLBACKS) ---
     const handleAddToCart = useCallback((product) => {
         if (!product || !product.id) {
             showToast("Lỗi: Sản phẩm không hợp lệ.");
@@ -232,7 +290,7 @@ export default function PosSystemContent() {
             return [...prevCart, { ...product, quantity: 1 }];
         });
     }, [setCart, showToast]);
-    
+
     const handleUpdateQuantity = useCallback((productId, newQuantityStr) => {
         const newQuantity = Math.max(1, parseInt(newQuantityStr, 10) || 1);
         const productInAll = allProducts.find(p => p.id === productId);
@@ -250,7 +308,7 @@ export default function PosSystemContent() {
 
     const handleRemoveFromCart = useCallback((productId) => { setCart(prev => prev.filter(item => item.id !== productId)); }, [setCart]);
     const handleCategoryFilter = useCallback((category) => { setActiveCategory(category); }, []);
-    
+
     const handleAddNewCustomer = useCallback(async (newCustomerData) => {
         try {
             const docRef = await addDoc(collection(db, "customers"), { ...newCustomerData, points: 0, createdAt: serverTimestamp() });
@@ -258,14 +316,14 @@ export default function PosSystemContent() {
             showToast("Thêm khách hàng thành công!");
         } catch (e) { showToast("Lỗi: Không thể thêm khách hàng."); }
     }, [setCurrentCustomer, showToast]);
-    
+
     const handleHoldBill = () => {
         if (cart.length === 0) { showToast('Không có hóa đơn để giữ!'); return; }
         setHeldBills(prev => [...prev, { id: Date.now(), cart, customer: currentCustomer, total: totalAfterDiscount, time: new Date(), pointsToUse }]);
         resetTransaction();
         showToast('Đã giữ hóa đơn thành công.');
     };
-    
+
     const handleRestoreBill = (billId) => {
         const bill = heldBills.find(b => b.id === billId);
         if (bill) {
@@ -276,15 +334,15 @@ export default function PosSystemContent() {
             showToast('Đã khôi phục hóa đơn.');
         }
     };
-    
+
     const handleDenominationClick = (amount) => {
         const currentAmount = parseCurrency(cashReceived);
         const newAmount = currentAmount + amount;
         setCashReceived(new Intl.NumberFormat('vi-VN').format(newAmount));
     };
-    
+
     const handleClearCashReceived = () => { setCashReceived(''); };
-    
+
     const finalizeSale = useCallback(async (saleCart, saleCustomer, salePointsUsedStr, paymentMethod) => {
         if (!saleCart || saleCart.length === 0) { showToast("Lỗi: Giỏ hàng trống."); return; }
         try {
@@ -333,7 +391,8 @@ export default function PosSystemContent() {
         } catch (error) { showToast(`Lỗi thanh toán: ${error.message}`); }
     }, [user, storeInfo, resetTransaction, showToast]);
 
-     const handleCreatePayOSLink = async () => {
+    // 🚨 HÀM XỬ LÝ TẠO LINK PAYOS 🚨
+    const handleCreatePayOSLink = async () => {
         if (cart.length === 0) {
             showToast("Giỏ hàng trống!");
             return;
@@ -380,11 +439,19 @@ export default function PosSystemContent() {
                         setIsQrModalOpen(false); // Đóng modal QR
                         showToast("Thanh toán đã bị hủy hoặc thất bại."); // Thông báo thất bại
                     }, 2000);
+                } else if (data && data.status === 'PENDING' && payosStatus === 'OPENED') {
+                    // Nếu trạng thái vẫn là pending sau khi popup đã mở, có thể người dùng đóng popup
+                    // và chúng ta vẫn chờ webhook. Không làm gì đặc biệt ở đây, cứ để modal hiển thị.
                 }
+            }, (error) => {
+                console.error("Lỗi lắng nghe transaction Firebase:", error);
+                setPayosStatus('ERROR'); // Cập nhật trạng thái lỗi
+                showToast("Lỗi kết nối Firebase, vui lòng thử lại.");
+                setIsQrModalOpen(false);
             });
 
             // 3. GỌI API BACKEND ĐỂ LẤY LINK THANH TOÁN
-            const response = await fetch('/api/create-payos-payment', {
+            const response = await fetch('/api/create-payment-link', { // Tên file đã thống nhất
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -412,46 +479,8 @@ export default function PosSystemContent() {
             setPayosStatus('ERROR'); // Cập nhật trạng thái lỗi
         }
     };
- useEffect(() => {
-        // Điều kiện:
-        // 1. payosStatus đang ở trạng thái chuẩn bị mở pop-up ('OPENING_POPUP')
-        // 2. paymentLinkData có checkoutUrl
-        // 3. payOSConfig đã được tạo (không phải null)
-        if (payosStatus === 'OPENING_POPUP' && paymentLinkData?.checkoutUrl && payOSConfig) {
-            openPayOSPopup(); // Gọi hàm mở pop-up của PayOS
-            setPayosStatus('OPENED'); // Cập nhật trạng thái đã mở
-        }
-    }, [payosStatus, paymentLinkData?.checkoutUrl, openPayOSPopup, payOSConfig]);
- const payOSConfig = useMemo(() => {
-        // Chỉ tạo config khi có checkoutUrl. Nếu không, trả về null.
-        if (!paymentLinkData?.checkoutUrl) return null;
 
-        return {
-            RETURN_URL: window.location.origin + router.pathname, // <-- QUAN TRỌNG: Trở về chính trang hiện tại
-            // ELEMENT_ID không cần thiết khi dùng embedded: false (dạng pop-up)
-            CHECKOUT_URL: paymentLinkData.checkoutUrl, // URL thanh toán lấy từ Backend
-            embedded: false, // <-- QUAN TRỌNG: ĐẶT LÀ FALSE ĐỂ HIỂN THỊ DẠNG POP-UP
-            onSuccess: (event) => {
-                console.log('PayOS onSuccess Callback (Frontend):', event);
-                setPayosStatus('PAID'); // Cập nhật UI ngay lập tức
-                // Logic hoàn tất giao dịch (finalizeSale) sẽ được kích hoạt bởi onSnapshot
-                // từ Firebase khi webhook cập nhật trạng thái PAID.
-            },
-            onCancel: (event) => {
-                console.log('PayOS onCancel Callback (Frontend):', event);
-                setPayosStatus('CANCELLED'); // Cập nhật UI ngay lập tức
-                // Logic hủy (transactionRef updated) sẽ được kích hoạt bởi onSnapshot.
-            },
-            onExit: (event) => {
-                console.log('PayOS onExit Callback (Frontend):', event);
-                setPayosStatus('EXIT'); // Cập nhật UI ngay lập tức (người dùng đóng pop-up)
-                // Quan trọng: Sự kiện onExit không đảm bảo giao dịch đã hủy.
-                // Luôn dựa vào Webhook (onSnapshot) để xác nhận trạng thái cuối cùng.
-            },
-        };
-    }, [paymentLinkData?.checkoutUrl, router.pathname]); 
 
-     const { open: openPayOSPopup, exit: exitPayOSPopup } = usePayOS(payOSConfig || {});
     const initiateCheckout = () => {
         if (activePaymentMethod === 'cash') {
             if (totalAfterDiscount > 0 && (parseCurrency(cashReceived) < totalAfterDiscount)) {
@@ -570,13 +599,14 @@ export default function PosSystemContent() {
                     </div>
                 </div>
             </main>
-            
+
             <Toast message={toast.message} show={toast.show} />
             <CalculatorModal show={showCalculator} onClose={() => setShowCalculator(false)} />
             <ProductLookupModal show={showProductLookup} onClose={() => setShowProductLookup(false)} products={allProducts} onProductSelect={handleAddToCart} />
             <CustomerModal show={showCustomerModal} onClose={() => setShowCustomerModal(false)} customers={customers} onSelectCustomer={setCurrentCustomer} onAddNewCustomer={handleAddNewCustomer} />
             <ReceiptModal show={showReceiptModal} onClose={() => { setShowReceiptModal(false); setLastReceiptData(null); }} data={lastReceiptData} />
-            <QrPaymentModal isOpen={isQrModalOpen} onClose={() => setIsQrModalOpen(false)} amount={totalAfterDiscount} checkoutUrl={paymentLinkData?.checkoutUrl} qrCode={paymentLinkData?.qrCode} status={paymentLinkData?.status || 'LOADING'} />
+            {/* 🚨 TRUYỀN payosStatus VÀO ĐÂY 🚨 */}
+            <QrPaymentModal isOpen={isQrModalOpen} onClose={() => setIsQrModalOpen(false)} amount={totalAfterDiscount} checkoutUrl={paymentLinkData?.checkoutUrl} qrCode={paymentLinkData?.qrCode} status={payosStatus} />
         </>
     );
 }

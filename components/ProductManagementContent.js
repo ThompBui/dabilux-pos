@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/router';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { auth, db } from '../firebase';
+import { auth, db } from '../lib/firebase-client';
 import { collection, query, orderBy, limit, getDocs, startAfter, doc, updateDoc } from 'firebase/firestore';
 import Sidebar from './Sidebar';
 import { Search, Archive, ArchiveRestore, CheckCircle, Loader2 } from 'lucide-react';

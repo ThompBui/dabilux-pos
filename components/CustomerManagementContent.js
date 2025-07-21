@@ -1,8 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { auth, db } from '../firebase';
-import { collection, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp, limit, getDocs, startAfter } from 'firebase/firestore';
+import { auth, db } from '../lib/firebase-client';import { collection, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp, limit, getDocs, startAfter } from 'firebase/firestore';
 import Sidebar from './Sidebar';
 import { Search, Edit, Trash2, Users, AlertCircle, X, UserPlus, Loader2 } from 'lucide-react';
 

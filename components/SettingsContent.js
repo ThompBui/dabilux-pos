@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { auth, db } from '../firebase';
+import { auth, db } from '../lib/firebase-client';
 import { collection, doc, setDoc, deleteDoc, serverTimestamp, onSnapshot, query, orderBy, addDoc, updateDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import Sidebar from './Sidebar';

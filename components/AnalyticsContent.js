@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/router';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { auth, db } from '../firebase';
+import { auth, db } from '../lib/firebase-client';
 import { collection, onSnapshot } from 'firebase/firestore';
 import dynamic from 'next/dynamic';
 import {

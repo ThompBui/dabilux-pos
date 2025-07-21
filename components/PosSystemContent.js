@@ -29,7 +29,7 @@ import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import ProductSkeleton from './ProductSkeleton';
 import { usePayOS, PayOSConfig } from '@payos/payos-checkout';
-
+import FlyingImage from './FlyingImage';
 // --- HÀM HỖ TRỢ & COMPONENT CON ---
 const formatCurrency = (amount) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount || 0);
 const parseCurrency = (string) => parseFloat(String(string).replace(/[^\d]/g, '')) || 0;
@@ -135,7 +135,8 @@ export default function PosSystemContent() {
     const [paymentLinkData, setPaymentLinkData] = useState(null);
     const [payosStatus, setPayosStatus] = useState('INIT');
     const [categories, setCategories] = useState(['all']);
-
+const [flyingAnims, setFlyingAnims] = useState([]);
+    const cartContainerRef = useRef(null);
     const lowStockProducts = useMemo(() => products.filter(p => p.stock !== undefined && p.stock <= 10), [products]);
 
     // --- HÀM HỖ TRỢ & CALLBACKS ---
@@ -274,29 +275,45 @@ const fetchProducts = useCallback(async (category, loadMore = false) => {
 
 
     // --- HÀM XỬ LÝ (CALLBACKS) ---
-    const handleAddToCart = useCallback((product) => {
-        if (!product || !product.id) {
-            showToast("Lỗi: Sản phẩm không hợp lệ.");
-            return;
-        }
-        if (product.stock <= 0) {
-            showToast(`"${product.name}" đã hết hàng!`);
-            return;
-        }
-        setCart(prevCart => {
-            const existingItem = prevCart.find(item => item.id === product.id);
-            if (existingItem) {
-                if (existingItem.quantity >= product.stock) {
-                    showToast(`Đã đạt số lượng tồn kho.`);
-                    return prevCart;
-                }
-                return prevCart.map(item =>
-                    item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
-                );
+    const handleAddToCart = useCallback((product, event) => { // Thêm `event` vào đây
+    if (!product || !product.id) {
+        showToast("Lỗi: Sản phẩm không hợp lệ.");
+        return;
+    }
+    if (product.stock <= 0) {
+        showToast(`"${product.name}" đã hết hàng!`);
+        return;
+    }
+
+    // --- PHẦN LOGIC THÊM HIỆU ỨNG ---
+    const startRect = event.currentTarget.getBoundingClientRect();
+    const endRect = cartContainerRef.current?.getBoundingClientRect();
+
+    if (startRect && endRect) {
+        const newAnim = {
+            id: Date.now(),
+            src: product.imageUrl || 'https://placehold.co/80x80/e2e8f0/64748b?text=Ảnh',
+            startRect,
+            endRect,
+        };
+        setFlyingAnims(prev => [...prev, newAnim]);
+    }
+    // --- KẾT THÚC LOGIC THÊM HIỆU ỨNG ---
+
+    setCart(prevCart => {
+        const existingItem = prevCart.find(item => item.id === product.id);
+        if (existingItem) {
+            if (existingItem.quantity >= product.stock) {
+                showToast(`Đã đạt số lượng tồn kho.`);
+                return prevCart;
             }
-            return [...prevCart, { ...product, quantity: 1 }];
-        });
-    }, [setCart, showToast]);
+            return prevCart.map(item =>
+                item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+            );
+        }
+        return [...prevCart, { ...product, quantity: 1 }];
+    });
+}, [setCart, showToast]);
 
     const handleUpdateQuantity = useCallback((productId, newQuantityStr) => {
         const newQuantity = Math.max(1, parseInt(newQuantityStr, 10) || 1);
@@ -495,6 +512,18 @@ const fetchProducts = useCallback(async (category, loadMore = false) => {
 
     return (
         <>
+            {flyingAnims.map(anim => (
+            <FlyingImage
+                key={anim.id}
+                src={anim.src}
+                startRect={anim.startRect}
+                endRect={anim.endRect}
+                onAnimationEnd={() => {
+                    // Xóa animation khỏi state sau khi nó hoàn thành
+                    setFlyingAnims(prev => prev.filter(a => a.id !== anim.id));
+                }}
+            />
+        ))}
             <main className="flex h-screen w-screen bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200 antialiased overflow-hidden">
                 <div className="w-[500px] flex-shrink-0 flex flex-col h-screen">
                     <header className="bg-white dark:bg-slate-800/50 backdrop-blur-sm border-b border-r border-slate-200 dark:border-slate-700 p-3 flex items-center justify-between flex-shrink-0">
@@ -508,7 +537,7 @@ const fetchProducts = useCallback(async (category, loadMore = false) => {
                         </div>
                     </header>
                     <div className="p-4 bg-white dark:bg-slate-800 border-b border-r border-slate-200 dark:border-slate-700"><div className="relative"><Barcode className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 text-slate-400"/><input type="text" placeholder="Quét mã vạch hoặc nhập tên (F3)..." className="w-full bg-slate-100 dark:bg-slate-700 rounded-lg pl-14 pr-4 py-4 text-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"/></div></div>
-                    <div className="flex-grow p-4 flex flex-col border-r border-slate-200 dark:border-slate-700 overflow-hidden">
+                    <div ref={cartContainerRef} className="flex-grow p-4 flex flex-col border-r border-slate-200 dark:border-slate-700 overflow-hidden">
                         <div className="flex-grow overflow-y-auto relative">
                             <table className="w-full text-sm text-left table-fixed">
                                 <thead className="text-xs text-slate-700 dark:text-slate-300 uppercase bg-slate-50 dark:bg-slate-700/50 sticky top-0 z-10">
@@ -563,7 +592,7 @@ const fetchProducts = useCallback(async (category, loadMore = false) => {
                                 Array.from({ length: 18 }).map((_, i) => <ProductSkeleton key={i} />)
                             ) : (
                                 products.map(product => (
-                                    <div key={product.id} onClick={product.stock > 0 ? () => handleAddToCart(product) : undefined} className={`relative bg-white dark:bg-slate-800 rounded-lg p-3 flex flex-col items-center text-center transform transition-all duration-200 shadow-md ${product.stock > 0 ? 'cursor-pointer hover:scale-105 hover:shadow-lg' : 'opacity-50 grayscale cursor-not-allowed'}`}>
+                                    <div key={product.id} onClick={product.stock > 0 ? (e) => handleAddToCart(product, e) : undefined} className={`relative bg-white dark:bg-slate-800 rounded-lg p-3 flex flex-col items-center text-center transform transition-all duration-200 shadow-md ${product.stock > 0 ? 'cursor-pointer hover:scale-105 hover:shadow-lg' : 'opacity-50 grayscale cursor-not-allowed'}`}>
                                         {product.stock <= 0 && (<span className="absolute top-2 right-2 badge badge-destructive z-10">Hết hàng</span>)}
                                         <Image src={product.imageUrl || 'https://placehold.co/80x80/e2e8f0/64748b?text=Ảnh'} alt={product.name} width={80} height={80} className="w-20 h-20 object-cover rounded-md mb-2"/>
                                         <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex-grow">{product.name}</div>

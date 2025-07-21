@@ -339,13 +339,13 @@ export default function PosSystemContent() {
     }
 
     setIsQrModalOpen(true);
-    setPaymentLinkData(null); // Reset link cũ
+    setPaymentLinkData(null); 
 
     const orderCode = Date.now();
     const transactionRef = doc(db, 'transactions', String(orderCode));
 
     try {
-        // 1. TẠO ĐƠN HÀNG TẠM TRÊN FIRESTORE
+        // 1. TẠO ĐƠN HÀNG TẠM VỚI ĐẦY ĐỦ THÔNG TIN
         const pendingTransaction = {
             status: 'PENDING',
             orderCode: orderCode,
@@ -354,31 +354,24 @@ export default function PosSystemContent() {
             cart: cart,
             customer: currentCustomer,
             pointsToUse: pointsToUse,
-            createdBy: { uid: user.uid, email: user.email } // Lưu thông tin người tạo
+            // DÒNG QUAN TRỌNG BỊ THIẾU ĐÃ ĐƯỢC BỔ SUNG
+            createdBy: { uid: user.uid, email: user.email }, 
         };
         await setDoc(transactionRef, pendingTransaction);
 
-        // 2. BẮT ĐẦU LẮNG NGHE THAY ĐỔI TRÊN ĐƠN HÀNG NÀY
+        // 2. BẮT ĐẦU LẮNG NGHE
         const unsubscribe = onSnapshot(transactionRef, (docSnap) => {
             const data = docSnap.data();
             if (data && data.status === 'PAID') {
-                // DỪNG LẮNG NGHE NGAY LẬP TỨC ĐỂ TRÁNH GỌI LẶP
                 unsubscribe();
-
-                // Cập nhật UI thành "Thành công!"
                 setPaymentLinkData(prev => ({ ...prev, status: 'PAID' }));
-
-                // Đợi 2 giây để người dùng thấy thông báo
                 setTimeout(() => {
-                    // SAU 2 GIÂY, MỚI BẮT ĐẦU LƯU ĐƠN HÀNG
                     finalizeSale(data.cart, data.customer, data.pointsToUse, 'qr');
-                    
-                    // VÀ ĐÓNG POPUP QR
                     setIsQrModalOpen(false);
                 }, 2000);
 
             } else if (data && data.status === 'CANCELLED') {
-                unsubscribe(); // Dừng lắng nghe
+                unsubscribe();
                 setPaymentLinkData(prev => ({ ...prev, status: 'CANCELLED' }));
                  setTimeout(() => {
                     setIsQrModalOpen(false);
@@ -399,8 +392,7 @@ export default function PosSystemContent() {
 
         const result = await response.json();
         if (!response.ok) throw new Error(result.error);
-
-        // 4. HIỂN THỊ POPUP VỚI MÃ QR
+        
         setPaymentLinkData({ ...result.data, status: 'PENDING' });
 
     } catch (error) {

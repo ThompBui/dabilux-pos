@@ -21,16 +21,16 @@ import {
   startAfter
 } from 'firebase/firestore';
 import {
-    ShoppingBasket, Sun, Moon, Barcode, FileText, Calculator, Search,
+    Sun, Moon, Barcode, FileText, Calculator, Search,
     UserCircle, UserPlus, UserCheck, UserX, PauseCircle, CheckCircle,
-    Wallet, Trash2, X, Printer, LogOut, Bell, Archive, Loader2, QrCode
+    Wallet, Trash2, X, Printer, LogOut, Bell, Loader2, QrCode
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import ProductSkeleton from './ProductSkeleton';
-import { usePayOS, PayOSConfig } from '@payos/payos-checkout';
+import { usePayOS } from '@payos/payos-checkout';
 import FlyingImage from './FlyingImage';
-import PayOSModal from '@/components/PayOSModal';
+
 // --- HÀM HỖ TRỢ & COMPONENT CON ---
 const formatCurrency = (amount) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount || 0);
 const parseCurrency = (string) => parseFloat(String(string).replace(/[^\d]/g, '')) || 0;
@@ -136,7 +136,7 @@ export default function PosSystemContent() {
     const [paymentLinkData, setPaymentLinkData] = useState(null);
     const [payosStatus, setPayosStatus] = useState('INIT');
     const [categories, setCategories] = useState(['all']);
-const [flyingAnims, setFlyingAnims] = useState([]);
+    const [flyingAnims, setFlyingAnims] = useState([]);
     const cartContainerRef = useRef(null);
     const lowStockProducts = useMemo(() => products.filter(p => p.stock !== undefined && p.stock <= 10), [products]);
 
@@ -148,43 +148,40 @@ const [flyingAnims, setFlyingAnims] = useState([]);
 
     const resetTransaction = useCallback(() => { setCart([]); setCurrentCustomer(null); setCashReceived(''); setPointsToUse(''); }, [setCart, setCurrentCustomer]);
     
-    // CODE MỚI ĐÃ SỬA
-const fetchProducts = useCallback(async (category, loadMore = false) => {
-    setDataLoading(true); // Bật loading
-    try {
-        const productsRef = collection(db, 'products');
-        
-        const queryConstraints = [
-            where('isActive', '==', true),
-            orderBy('name'),
-            limit(30)
-        ];
+    // SỬA LỖI HIỆU NĂNG: Loại bỏ `lastVisibleProduct` khỏi dependency array để phá vỡ vòng lặp
+    const fetchProducts = useCallback(async (category, loadMore = false) => {
+        setDataLoading(true);
+        try {
+            const productsRef = collection(db, 'products');
+            const queryConstraints = [
+                // where('isActive', '==', true), // Tạm thời bỏ qua để hiển thị hết sản phẩm
+                orderBy('name'),
+                limit(30)
+            ];
 
-        if (category !== 'all') {
-            queryConstraints.unshift(where('category', '==', category));
+            if (category !== 'all') {
+                queryConstraints.unshift(where('category', '==', category));
+            }
+
+            if (loadMore && lastVisibleProduct) { 
+                queryConstraints.push(startAfter(lastVisibleProduct));
+            }
+
+            const q = query(productsRef, ...queryConstraints);
+            const documentSnapshots = await getDocs(q);
+            const newProducts = documentSnapshots.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+            setLastVisibleProduct(documentSnapshots.docs[documentSnapshots.docs.length - 1]);
+            setProducts(prevProducts => loadMore ? [...prevProducts, ...newProducts] : newProducts);
+            setHasMoreProducts(documentSnapshots.docs.length === 30);
+
+        } catch (error) {
+            console.error("Lỗi khi tải sản phẩm:", error);
+            showToast("Không thể tải danh sách sản phẩm. Vui lòng kiểm tra Index trong Firestore.");
+        } finally {
+            setDataLoading(false);
         }
-
-        // Dù không có trong dependency, hàm vẫn truy cập được state mới nhất
-        if (loadMore && lastVisibleProduct) { 
-            queryConstraints.push(startAfter(lastVisibleProduct));
-        }
-
-        const q = query(productsRef, ...queryConstraints);
-        const documentSnapshots = await getDocs(q);
-
-        const newProducts = documentSnapshots.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-        setLastVisibleProduct(documentSnapshots.docs[documentSnapshots.docs.length - 1]);
-        setProducts(prevProducts => loadMore ? [...prevProducts, ...newProducts] : newProducts);
-        setHasMoreProducts(documentSnapshots.docs.length === 30);
-
-    } catch (error) {
-        console.error("Lỗi khi tải sản phẩm:", error);
-        showToast("Không thể tải danh sách sản phẩm.");
-    } finally {
-        setDataLoading(false); // Tắt loading
-    }
-}, [showToast]); 
+    }, [showToast]); // <-- Đã sửa: Chỉ phụ thuộc vào showToast
 
 
     // --- PAYOS & USE EFFECTS ---
@@ -276,45 +273,37 @@ const fetchProducts = useCallback(async (category, loadMore = false) => {
 
 
     // --- HÀM XỬ LÝ (CALLBACKS) ---
-    const handleAddToCart = useCallback((product, event) => { // Thêm `event` vào đây
-    if (!product || !product.id) {
-        showToast("Lỗi: Sản phẩm không hợp lệ.");
-        return;
-    }
-    if (product.stock <= 0) {
-        showToast(`"${product.name}" đã hết hàng!`);
-        return;
-    }
+    const handleAddToCart = useCallback((product, event) => {
+        if (!product || !product.id) { showToast("Lỗi: Sản phẩm không hợp lệ."); return; }
+        if (product.stock <= 0) { showToast(`"${product.name}" đã hết hàng!`); return; }
 
-    // --- PHẦN LOGIC THÊM HIỆU ỨNG ---
-    const startRect = event.currentTarget.getBoundingClientRect();
-    const endRect = cartContainerRef.current?.getBoundingClientRect();
+        const startRect = event.currentTarget.getBoundingClientRect();
+        const endRect = cartContainerRef.current?.getBoundingClientRect();
 
-    if (startRect && endRect) {
-        const newAnim = {
-            id: Date.now(),
-            src: product.imageUrl || 'https://placehold.co/80x80/e2e8f0/64748b?text=Ảnh',
-            startRect,
-            endRect,
-        };
-        setFlyingAnims(prev => [...prev, newAnim]);
-    }
-    // --- KẾT THÚC LOGIC THÊM HIỆU ỨNG ---
-
-    setCart(prevCart => {
-        const existingItem = prevCart.find(item => item.id === product.id);
-        if (existingItem) {
-            if (existingItem.quantity >= product.stock) {
-                showToast(`Đã đạt số lượng tồn kho.`);
-                return prevCart;
-            }
-            return prevCart.map(item =>
-                item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
-            );
+        if (startRect && endRect) {
+            const newAnim = {
+                id: Date.now(),
+                src: product.imageUrl || 'https://placehold.co/80x80/e2e8f0/64748b?text=Ảnh',
+                startRect,
+                endRect,
+            };
+            setFlyingAnims(prev => [...prev, newAnim]);
         }
-        return [...prevCart, { ...product, quantity: 1 }];
-    });
-}, [setCart, showToast]);
+
+        setCart(prevCart => {
+            const existingItem = prevCart.find(item => item.id === product.id);
+            if (existingItem) {
+                if (existingItem.quantity >= product.stock) {
+                    showToast(`Đã đạt số lượng tồn kho.`);
+                    return prevCart;
+                }
+                return prevCart.map(item =>
+                    item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+                );
+            }
+            return [...prevCart, { ...product, quantity: 1 }];
+        });
+    }, [setCart, showToast]);
 
     const handleUpdateQuantity = useCallback((productId, newQuantityStr) => {
         const newQuantity = Math.max(1, parseInt(newQuantityStr, 10) || 1);
@@ -413,7 +402,7 @@ const fetchProducts = useCallback(async (category, loadMore = false) => {
                     transaction.update(doc(db, 'products', productDoc.id), { stock: increment(-saleCart[i].quantity) });
                 });
                 if (finalCustomerData) {
-                    transaction.update(doc(db, 'customers', finalCustomerData.id), { points: finalCustomerData.points });
+                    transaction.update(doc(db, 'customers', finalCustomerData.id), { points: finalCustomerPoints });
                 }
                 const billData = { items: saleCart, customer: finalCustomerData, subtotal: saleSubtotal, tax: saleTax, discountAmount: saleDiscountAmount, totalAfterDiscount: saleTotalAfterDiscount, paymentMethod, createdBy: user.email, createdAt: serverTimestamp(), pointsEarned: pointsEarnedThisTransaction, pointsUsed: finalCustomerData ? Math.min(salePointsUsed, saleCustomer.points || 0) : 0, storeInfo };
                 transaction.set(doc(collection(db, 'bills')), billData);
@@ -471,32 +460,29 @@ const fetchProducts = useCallback(async (category, loadMore = false) => {
             });
 
             const response = await fetch('/api/create-payment-link', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    orderCode: orderCode,
-    amount: Math.round(totalAfterDiscount),
-    description: `DH #${orderCode}`,
-    items: cart
-      .filter(item => item.name && item.quantity && item.price >= 0)
-      .map(item => ({
-        name: String(item.name),
-        quantity: Number(item.quantity),
-        price: Math.round(item.price * item.quantity)
-      })),
-    cancelUrl: "http://localhost:3000",
-    returnUrl: "http://localhost:3000"
-  })
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+        orderCode: orderCode,
+        amount: Math.round(totalAfterDiscount),
+        description: `DH ${orderCode} (POS)`,
+        // ---- SỬA Ở ĐÂY ----
+        // Thêm dòng này để gửi thông tin giỏ hàng
+        items: cart.map(item => ({
+            name: item.name,
+            quantity: item.quantity,
+            price: item.price
+        }))
+        // ------------------
+    }),
 });
-
-
 
             const result = await response.json();
             if (!response.ok || result.error) {
-                throw new Error(result.error || "Không thể lấy link thanh toán từ PayOS");
+                throw new Error(result.details || "Không thể lấy link thanh toán từ PayOS");
             }
 
-            setPaymentLinkData({ ...result.data, status: 'PENDING' });
+            setPaymentLinkData(result.data);
             setPayosStatus('OPENING_POPUP');
 
         } catch (error) {
@@ -531,19 +517,19 @@ const fetchProducts = useCallback(async (category, loadMore = false) => {
                 startRect={anim.startRect}
                 endRect={anim.endRect}
                 onAnimationEnd={() => {
-                    // Xóa animation khỏi state sau khi nó hoàn thành
                     setFlyingAnims(prev => prev.filter(a => a.id !== anim.id));
                 }}
             />
         ))}
             <main className="flex h-screen w-screen bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200 antialiased overflow-hidden">
+                
+                {/* CỘT 1: GIỎ HÀNG (BÊN TRÁI) */}
                 <div className="w-[500px] flex-shrink-0 flex flex-col h-screen">
                     <header className="bg-white dark:bg-slate-800/50 backdrop-blur-sm border-b border-r border-slate-200 dark:border-slate-700 p-3 flex items-center justify-between flex-shrink-0">
                         <div className="flex items-center gap-3">
                             <Image src={storeInfo.logoUrl || 'https://placehold.co/40x40/6366f1/ffffff?text=POS'} alt="Logo" width={40} height={40} className="object-contain rounded-md bg-slate-200"/>
                             <div><h1 className="text-lg font-bold">{storeInfo.name}</h1><p className="text-xs text-slate-500 dark:text-slate-400">Quầy 01 - {user?.displayName || user?.email}</p></div>
                         </div>
-                        
                         <div className="flex items-center gap-2">
                             <div className="text-right"><p className="font-semibold text-lg">{currentTime.toLocaleTimeString('vi-VN')}</p><p className="text-xs text-slate-500 dark:text-slate-400">{currentTime.toLocaleDateString('vi-VN')}</p></div>
                             <button onClick={() => setTheme(t => t === 'light' ? 'dark' : 'light')} className="p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700" title="Đổi giao diện">{theme === 'light' ? <Moon size={20}/> : <Sun size={20}/>}</button>
@@ -584,7 +570,8 @@ const fetchProducts = useCallback(async (category, loadMore = false) => {
                     </div>
                 </div>
 
-                <div className="flex-1 flex flex-col h-screen bg-slate-50 dark:bg-slate-900/50 border-r border-slate-200 dark:border-slate-700">
+                {/* CỘT 2: SẢN PHẨM (Ở GIỮA) */}
+                <div className="flex-1 flex flex-col h-screen bg-slate-50 dark:bg-slate-900/50 border-r border-slate-200 dark:border-slate-700 min-w-0">
                    <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex-shrink-0 flex justify-between items-center">
                         <h2 className="text-lg font-bold">Danh mục sản phẩm</h2>
                         <div className="flex items-center gap-2">
@@ -600,7 +587,8 @@ const fetchProducts = useCallback(async (category, loadMore = false) => {
                    </div>
                    <div className="p-2 flex items-center gap-2 overflow-x-auto pb-2 flex-nowrap border-b border-slate-200 dark:border-slate-700 flex-shrink-0">{categories.map(category => (<button key={category} onClick={() => handleCategoryFilter(category)} className={`px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap ${activeCategory === category ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-700'}`}>{category === 'all' ? 'Tất cả' : category}</button>))}</div>
                    <div className="flex-grow p-4 overflow-y-auto">
-                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
+                        {/* SỬA LỖI BỐ CỤC: Thay đổi class của grid */}
+                        <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
                             {dataLoading && products.length === 0 ? (
                                 Array.from({ length: 18 }).map((_, i) => <ProductSkeleton key={i} />)
                             ) : (
@@ -627,6 +615,7 @@ const fetchProducts = useCallback(async (category, loadMore = false) => {
                     </div>
                 </div>
 
+                {/* CỘT 3: THANH TOÁN (BÊN PHẢI) */}
                 <div className="w-[420px] flex-shrink-0 bg-white dark:bg-slate-800 flex flex-col h-screen">
                     <div className="p-4 border-b border-slate-200 dark:border-slate-700"><CustomerPanel customer={currentCustomer} onAction={(action) => action === 'open_modal' ? setShowCustomerModal(true) : setCurrentCustomer(null)} /></div>
                     <div className="p-4 border-b border-slate-200 dark:border-slate-700"><h3 className="font-bold mb-2 text-sm uppercase text-slate-500">Hóa đơn đang giữ</h3><div className="flex items-center gap-2 overflow-x-auto pb-2">{heldBills.length === 0 ? (<p className="text-xs text-slate-400">Chưa có hóa đơn.</p>) : (heldBills.map(bill => (<button key={bill.id} onClick={() => handleRestoreBill(bill.id)} className="p-2 rounded-lg bg-slate-200 dark:bg-slate-700 text-left w-40 flex-shrink-0"><p className="font-bold text-sm truncate">{bill.customer?.name || 'Khách lẻ'}</p><p className="text-xs text-indigo-500 font-semibold">{formatCurrency(bill.total)}</p><p className="text-xs text-slate-400">{new Date(bill.time).toLocaleTimeString('vi-VN')}</p></button>)))}</div></div>
@@ -639,7 +628,6 @@ const fetchProducts = useCallback(async (category, loadMore = false) => {
                         <div className="grid grid-cols-3 gap-2 pt-2">{[10000, 20000, 50000, 100000, 200000, 500000].map(value => (<button key={value} onClick={() => handleDenominationClick(value)} className="text-sm font-semibold py-2 bg-slate-200 dark:bg-slate-700 rounded-md hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">{new Intl.NumberFormat('vi-VN').format(value)}</button>))}<button onClick={handleClearCashReceived} className="col-span-3 text-sm font-semibold py-2 bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300 rounded-md hover:bg-red-200 dark:hover:bg-red-900 transition-colors">Xóa</button></div>
                         <div className="flex justify-between items-center text-xl font-bold text-green-600 dark:text-green-400"><span>Tiền thừa</span><span>{formatCurrency(changeAmount)}</span></div>
                     </div>
-                    
                     <div className="p-4 mt-auto bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-700">
                         <div className="grid grid-cols-2 gap-3 mb-3">
                             <button onClick={() => setActivePaymentMethod('cash')} className={`btn-payment ${activePaymentMethod === 'cash' ? 'active' : ''}`}><Wallet size={18}/>Tiền mặt</button>
@@ -659,5 +647,4 @@ const fetchProducts = useCallback(async (category, loadMore = false) => {
             <QrPaymentModal isOpen={isQrModalOpen} onClose={() => setIsQrModalOpen(false)} amount={totalAfterDiscount} checkoutUrl={paymentLinkData?.checkoutUrl} qrCode={paymentLinkData?.qrCode} status={payosStatus} />
         </>
     );
-    
 }

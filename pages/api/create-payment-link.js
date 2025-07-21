@@ -32,8 +32,11 @@ export default async function handler(req, res) {
       cancelUrl: `${process.env.NEXT_PUBLIC_BASE_URL}/checkout`, // Quay về trang checkout
       returnUrl: `${process.env.NEXT_PUBLIC_BASE_URL}/checkout`, // Quay về trang checkout
       items: req.body.items || [],
+      
     };
-
+    if (paymentData.items.length === 0) {
+        return res.status(400).json({ error: 'Giỏ hàng không được để trống.' });
+    }
     console.log("Đang gửi dữ liệu tới PayOS:", paymentData);
 
     const paymentLink = await payos.createPaymentLink(paymentData);

@@ -1,6 +1,17 @@
+// pages/api/payos-webhook.js
+
 import PayOS from "@payos/node";
-import admin from 'firebase-admin'; // Import admin để dùng các hàm đặc biệt
-import { db_server } from '../../lib/firebase-admin.js';
+import admin from 'firebase-admin';
+import { 
+    collection, 
+    query, 
+    where, 
+    orderBy, 
+    limit, 
+    getDocs 
+} from "firebase-admin/firestore";
+import { db_server } from "../../lib/firebase-admin"; // Đảm bảo đường dẫn này đúng
+
 const payos = new PayOS(process.env.PAYOS_CLIENT_ID, process.env.PAYOS_API_KEY, process.env.PAYOS_CHECKSUM_KEY);
 
 export default async function handler(req, res) {
@@ -10,30 +21,41 @@ export default async function handler(req, res) {
   }
 
   const webhookData = req.body;
-console.log("\n\n--- NHẬN ĐƯỢC DỮ LIỆU WEBHOOK ---");
-console.log("Data nhận được:", JSON.stringify(webhookData, null, 2));
-console.log("---------------------------------\n\n");
+
   try {
     console.log("Đang xác thực Webhook...");
     const verifiedData = payos.verifyPaymentWebhookData(webhookData);
     console.log("Webhook đã được xác thực thành công:", verifiedData);
 
     if (verifiedData.code === '00') {
-      const orderCode = verifiedData.orderCode;
+      console.log(`Giao dịch từ PayOS thành công. Bắt đầu tìm và cập nhật giao dịch PENDING trong Firestore...`);
+
+      // TÌM GIAO DỊCH PENDING MỚI NHẤT
+      const q = query(
+        db_server.collection('transactions'), 
+        where('status', '==', 'PENDING'), 
+        orderBy('createdAt', 'desc'), 
+        limit(1)
+      );
+
+      const querySnapshot = await getDocs(q);
+
+      if (querySnapshot.empty) {
+        // Nếu không tìm thấy, nghĩa là client đã không tạo được bản ghi
+        console.error("Lỗi nghiêm trọng: Không tìm thấy giao dịch nào ở trạng thái PENDING để cập nhật.");
+        throw new Error("No pending transaction found to update.");
+      }
       
-      console.log(`Giao dịch ${orderCode} thành công. Bắt đầu cập nhật Firestore...`);
-      
-      // Sử dụng `db_server` để có quyền ghi vào DB từ server
-      const transactionRef = db_server.collection('transactions').doc(String(orderCode));
-      
-      // Dùng cú pháp của Admin SDK để cập nhật
-      await transactionRef.update({
+      // Lấy ID của document tìm được và cập nhật nó
+      const transactionDoc = querySnapshot.docs[0];
+      await transactionDoc.ref.update({
         status: 'PAID',
         webhookReceivedAt: admin.firestore.FieldValue.serverTimestamp(),
         payosData: verifiedData,
       });
       
-      console.log(`Cập nhật Firestore cho giao dịch ${orderCode} thành công.`);
+      console.log(`Cập nhật Firestore cho giao dịch ${transactionDoc.id} thành công.`);
+
     } else {
       console.log(`Webhook nhận được nhưng giao dịch chưa thành công. Code: ${verifiedData.code}`);
     }
@@ -42,6 +64,6 @@ console.log("---------------------------------\n\n");
 
   } catch (error) {
     console.error('Xác thực Webhook thất bại hoặc có lỗi xử lý:', error);
-    return res.status(400).json({ error: 'Webhook verification failed or processing error.' });
+    return res.status(400).json({ error: 'Webhook processing error.' });
   }
 }

@@ -371,7 +371,7 @@ const handleCreatePayOSLink = async () => {
             body: JSON.stringify({
                 orderCode: orderCode,
                 amount: Math.round(totalAfterDiscount),
-                description: `Thanh toan don hang ${orderCode}`,
+                description: `DH ${orderCode}`,
             }),
         });
 

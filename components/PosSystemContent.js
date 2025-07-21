@@ -333,35 +333,83 @@ export default function PosSystemContent() {
     }, [user, storeInfo, resetTransaction, showToast]);
 
     const handleCreatePayOSLink = async () => {
-        if (cart.length === 0) { showToast("Giỏ hàng trống!"); return; }
-        setIsQrModalOpen(true);
-        setPaymentLinkData(null);
-        const orderCode = Date.now();
-        const transactionRef = doc(db, 'transactions', String(orderCode));
-        try {
-            const pendingTransaction = { status: 'PENDING', orderCode: orderCode, amount: Math.round(totalAfterDiscount), createdAt: serverTimestamp(), cart: cart, customer: currentCustomer, pointsToUse: pointsToUse };
-            await setDoc(transactionRef, pendingTransaction);
-            const unsubscribe = onSnapshot(transactionRef, (docSnap) => {
-                const data = docSnap.data();
-                if (data && data.status === 'PAID') {
-                    setPaymentLinkData(prev => ({ ...prev, status: 'PAID' }));
+    if (cart.length === 0) {
+        showToast("Giỏ hàng trống!");
+        return;
+    }
+
+    setIsQrModalOpen(true);
+    setPaymentLinkData(null); // Reset link cũ
+
+    const orderCode = Date.now();
+    const transactionRef = doc(db, 'transactions', String(orderCode));
+
+    try {
+        // 1. TẠO ĐƠN HÀNG TẠM TRÊN FIRESTORE
+        const pendingTransaction = {
+            status: 'PENDING',
+            orderCode: orderCode,
+            amount: Math.round(totalAfterDiscount),
+            createdAt: serverTimestamp(),
+            cart: cart,
+            customer: currentCustomer,
+            pointsToUse: pointsToUse,
+            createdBy: { uid: user.uid, email: user.email } // Lưu thông tin người tạo
+        };
+        await setDoc(transactionRef, pendingTransaction);
+
+        // 2. BẮT ĐẦU LẮNG NGHE THAY ĐỔI TRÊN ĐƠN HÀNG NÀY
+        const unsubscribe = onSnapshot(transactionRef, (docSnap) => {
+            const data = docSnap.data();
+            if (data && data.status === 'PAID') {
+                // DỪNG LẮNG NGHE NGAY LẬP TỨC ĐỂ TRÁNH GỌI LẶP
+                unsubscribe();
+
+                // Cập nhật UI thành "Thành công!"
+                setPaymentLinkData(prev => ({ ...prev, status: 'PAID' }));
+
+                // Đợi 2 giây để người dùng thấy thông báo
+                setTimeout(() => {
+                    // SAU 2 GIÂY, MỚI BẮT ĐẦU LƯU ĐƠN HÀNG
                     finalizeSale(data.cart, data.customer, data.pointsToUse, 'qr');
-                    setTimeout(() => { setIsQrModalOpen(false); unsubscribe(); }, 2500);
-                } else if (data && data.status === 'CANCELLED') {
-                    setPaymentLinkData(prev => ({ ...prev, status: 'CANCELLED' }));
-                    setTimeout(() => { setIsQrModalOpen(false); unsubscribe(); }, 2500);
-                }
-            });
-            const response = await fetch('/api/create-payment-link', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ orderCode: orderCode, amount: Math.round(totalAfterDiscount), description: `DH ${orderCode}` }),
-            });
-            const result = await response.json();
-            if (!response.ok) throw new Error(result.error);
-            setPaymentLinkData({ ...result.data, status: 'PENDING' });
-        } catch (error) { showToast(`Lỗi: ${error.message}`); setIsQrModalOpen(false); await deleteDoc(transactionRef); }
-    };
+                    
+                    // VÀ ĐÓNG POPUP QR
+                    setIsQrModalOpen(false);
+                }, 2000);
+
+            } else if (data && data.status === 'CANCELLED') {
+                unsubscribe(); // Dừng lắng nghe
+                setPaymentLinkData(prev => ({ ...prev, status: 'CANCELLED' }));
+                 setTimeout(() => {
+                    setIsQrModalOpen(false);
+                }, 2500);
+            }
+        });
+
+        // 3. GỌI API ĐỂ LẤY LINK THANH TOÁN
+        const response = await fetch('/api/create-payment-link', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                orderCode: orderCode,
+                amount: Math.round(totalAfterDiscount),
+                description: `DH ${orderCode}`,
+            }),
+        });
+
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error);
+
+        // 4. HIỂN THỊ POPUP VỚI MÃ QR
+        setPaymentLinkData({ ...result.data, status: 'PENDING' });
+
+    } catch (error) {
+        console.error("Lỗi khi tạo giao dịch PayOS:", error);
+        showToast(`Lỗi: ${error.message}`);
+        setIsQrModalOpen(false);
+        await deleteDoc(transactionRef);
+    }
+};
 
     const initiateCheckout = () => {
         if (activePaymentMethod === 'cash') {

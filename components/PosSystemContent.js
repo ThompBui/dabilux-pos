@@ -221,50 +221,97 @@ export default function PosSystemContent() {
     };
     const handleClearCashReceived = () => { setCashReceived(''); };
     
-    const finalizeSale = useCallback(async (saleCart, saleCustomer, salePointsUsedStr, paymentMethod) => {
-        if (!saleCart || saleCart.length === 0) { showToast("Lỗi: Giỏ hàng trống."); return; }
-        try {
-            await runTransaction(db, async (transaction) => {
-                const saleSubtotal = saleCart.reduce((sum, item) => sum + item.price * item.quantity, 0);
-                const saleTax = saleSubtotal * 0.1;
-                const saleTotal = saleSubtotal + saleTax;
-                const salePointsUsed = parseCurrency(salePointsUsedStr);
-                let saleDiscountAmount = 0;
-                if(saleCustomer && salePointsUsed > 0) {
-                    saleDiscountAmount = Math.min(salePointsUsed * 1000, saleTotal);
-                }
-                const saleTotalAfterDiscount = saleTotal - saleDiscountAmount;
+   const finalizeSale = useCallback(async (saleCart, saleCustomer, salePointsUsedStr, paymentMethod) => {
+    if (!saleCart || saleCart.length === 0) {
+        showToast("Lỗi: Giỏ hàng trống.");
+        return;
+    }
 
-                for (const cartItem of saleCart) {
-                    const productRef = doc(db, 'products', cartItem.id);
-                    const productDoc = await transaction.get(productRef);
-                    if (!productDoc.exists() || productDoc.data().stock < cartItem.quantity) {
-                        throw new Error(`Tồn kho không đủ cho "${cartItem.name}".`);
-                    }
-                    transaction.update(productRef, { stock: increment(-cartItem.quantity) });
+    try {
+        await runTransaction(db, async (transaction) => {
+            // --- GIAI ĐOẠN ĐỌC (READ PHASE) ---
+            // Đọc tất cả các document cần thiết trước
+            const productRefs = saleCart.map(item => doc(db, 'products', item.id));
+            const productDocs = await Promise.all(productRefs.map(ref => transaction.get(ref)));
+            let customerDoc = null;
+            if (saleCustomer) {
+                const customerRef = doc(db, 'customers', saleCustomer.id);
+                customerDoc = await transaction.get(customerRef);
+            }
+
+            // --- GIAI ĐOẠN KIỂM TRA & TÍNH TOÁN (LOGIC PHASE) ---
+            // Kiểm tra tồn kho
+            for (let i = 0; i < productDocs.length; i++) {
+                const productDoc = productDocs[i];
+                const cartItem = saleCart[i];
+                if (!productDoc.exists() || productDoc.data().stock < cartItem.quantity) {
+                    throw new Error(`Tồn kho không đủ cho "${cartItem.name}".`);
                 }
-                
-                let finalCustomerData = null;
-                let pointsEarnedThisTransaction = 0;
-                if (saleCustomer) {
-                    const customerRef = doc(db, 'customers', saleCustomer.id);
-                    const customerDoc = await transaction.get(customerRef);
-                    const serverPoints = customerDoc.exists() ? (customerDoc.data().points || 0) : 0;
-                    const pointsUsedThisTransaction = Math.min(salePointsUsed, serverPoints);
-                    pointsEarnedThisTransaction = Math.floor(saleSubtotal / 10000);
-                    const finalCustomerPoints = serverPoints - pointsUsedThisTransaction + pointsEarnedThisTransaction;
-                    transaction.update(customerRef, { points: finalCustomerPoints });
-                    finalCustomerData = { ...saleCustomer, points: finalCustomerPoints };
-                }
-                
-                const billData = { items: saleCart, customer: finalCustomerData, subtotal: saleSubtotal, tax: saleTax, discountAmount: saleDiscountAmount, totalAfterDiscount: saleTotalAfterDiscount, paymentMethod, createdBy: user.email, createdAt: serverTimestamp(), pointsEarned: pointsEarnedThisTransaction, pointsUsed: finalCustomerData ? Math.min(salePointsUsed, saleCustomer.points || 0) : 0, storeInfo };
-                transaction.set(doc(collection(db, 'bills')), billData);
-                setLastReceiptData({ ...billData, createdAt: new Date(), customer: finalCustomerData, storeInfo });
+            }
+            
+            // Tính toán các giá trị
+            const saleSubtotal = saleCart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+            const saleTax = saleSubtotal * 0.1;
+            const saleTotal = saleSubtotal + saleTax;
+            const salePointsUsed = parseCurrency(salePointsUsedStr);
+            let saleDiscountAmount = 0;
+            let finalCustomerData = null;
+            let pointsEarnedThisTransaction = 0;
+
+            if (saleCustomer && customerDoc && customerDoc.exists()) {
+                const serverPoints = customerDoc.data().points || 0;
+                const pointsUsedThisTransaction = Math.min(salePointsUsed, serverPoints);
+                saleDiscountAmount = Math.min(pointsUsedThisTransaction * 1000, saleTotal);
+                pointsEarnedThisTransaction = Math.floor(saleSubtotal / 10000);
+                const finalCustomerPoints = serverPoints - pointsUsedThisTransaction + pointsEarnedThisTransaction;
+                finalCustomerData = { ...saleCustomer, points: finalCustomerPoints };
+            }
+
+            const saleTotalAfterDiscount = saleTotal - saleDiscountAmount;
+
+            // --- GIAI ĐOẠN GHI (WRITE PHASE) ---
+            // Cập nhật tồn kho sản phẩm
+            productDocs.forEach((productDoc, i) => {
+                const productRef = doc(db, 'products', productDoc.id);
+                transaction.update(productRef, { stock: increment(-saleCart[i].quantity) });
             });
-            setShowReceiptModal(true);
-            resetTransaction();
-        } catch (error) { showToast(`Lỗi thanh toán: ${error.message}`); }
-    }, [user, storeInfo, resetTransaction, showToast]);
+
+            // Cập nhật điểm khách hàng
+            if (finalCustomerData) {
+                const customerRef = doc(db, 'customers', finalCustomerData.id);
+                transaction.update(customerRef, { points: finalCustomerData.points });
+            }
+
+            // Tạo hóa đơn mới
+            const billData = {
+                items: saleCart,
+                customer: finalCustomerData,
+                subtotal: saleSubtotal,
+                tax: saleTax,
+                discountAmount: saleDiscountAmount,
+                totalAfterDiscount: saleTotalAfterDiscount,
+                paymentMethod,
+                createdBy: user.email,
+                createdAt: serverTimestamp(),
+                pointsEarned: pointsEarnedThisTransaction,
+                pointsUsed: finalCustomerData ? Math.min(salePointsUsed, saleCustomer.points || 0) : 0,
+                storeInfo
+            };
+            const newBillRef = doc(collection(db, 'bills'));
+            transaction.set(newBillRef, billData);
+            
+            // Chuẩn bị dữ liệu cho hóa đơn
+            setLastReceiptData({ ...billData, createdAt: new Date(), customer: finalCustomerData, storeInfo });
+        });
+
+        // --- HÀNH ĐỘNG SAU KHI GIAO DỊCH THÀNH CÔNG ---
+        setShowReceiptModal(true);
+        resetTransaction();
+
+    } catch (error) {
+        showToast(`Lỗi thanh toán: ${error.message}`);
+    }
+}, [user, storeInfo, resetTransaction, showToast]);
 
     // Đặt hàm này vào trong component PosSystemContent.js
 const handleCreatePayOSLink = async () => {

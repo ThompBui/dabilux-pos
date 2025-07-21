@@ -5,13 +5,16 @@ import { auth, db } from '../lib/firebase-client';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
-import { DollarSign, ShoppingCart, TrendingUp, Users, AlertTriangle, Tag, CreditCard, Calendar as CalendarIcon, BarChart } from 'lucide-react';
+import {
+  DollarSign, ShoppingCart, TrendingUp, Users,
+  AlertTriangle, Tag, CreditCard, Calendar as CalendarIcon, BarChart
+} from 'lucide-react';
 import { format, startOfDay, endOfDay, startOfWeek, startOfMonth, startOfYear } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import { DayPicker } from 'react-day-picker';
 import 'react-day-picker/dist/style.css';
 
-// Tối ưu: Lazy load các component biểu đồ
+// Lazy load các component biểu đồ
 const DynamicResponsiveContainer = dynamic(() => import('recharts').then(mod => mod.ResponsiveContainer), { ssr: false });
 const DynamicLineChart = dynamic(() => import('recharts').then(mod => mod.LineChart), { ssr: false });
 const DynamicLine = dynamic(() => import('recharts').then(mod => mod.Line), { ssr: false });
@@ -21,65 +24,63 @@ const DynamicCartesianGrid = dynamic(() => import('recharts').then(mod => mod.Ca
 const DynamicTooltip = dynamic(() => import('recharts').then(mod => mod.Tooltip), { ssr: false });
 const DynamicLegend = dynamic(() => import('recharts').then(mod => mod.Legend), { ssr: false });
 
-// --- CÁC HÀM HỖ TRỢ ---
-const formatCurrency = (amount) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount || 0);
-
-const calculateStats = (bills) => {
-    if (!bills || bills.length === 0) return { revenue: 0, transactions: 0, avgValue: 0, profit: 0 };
-    const revenue = bills.reduce((sum, bill) => sum + (bill.totalAfterDiscount || 0), 0);
-    const transactions = bills.length;
-    const avgValue = transactions > 0 ? revenue / transactions : 0;
-    const profit = bills.reduce((sum, bill) => {
-        const billProfit = (bill.items || []).reduce((itemSum, item) => {
-            const cost = item.lastImportPrice || item.price * 0.7;
-            return itemSum + ((item.price * item.quantity) - (cost * item.quantity));
-        }, 0);
-        return sum + billProfit;
-    }, 0);
-    return { revenue, transactions, avgValue, profit };
-};
+// Format tiền tệ
+const formatCurrency = (amount) =>
+  new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount || 0);
 
 const SectionTitle = ({ title, icon }) => (
-    <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-4">
-        {icon} {title}
-    </h2>
+  <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-4">
+    {icon} {title}
+  </h2>
 );
 
 const StatCard = ({ title, value, icon, iconBgColor }) => (
-    <div className="bg-white dark:bg-slate-800 p-5 rounded-xl shadow-md flex items-center space-x-4">
-        <div className={`p-3 rounded-full ${iconBgColor}`}>{icon}</div>
-        <div>
-            <p className="text-sm text-slate-500 dark:text-slate-400">{title}</p>
-            <h3 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{value}</h3>
-        </div>
+  <div className="bg-white dark:bg-slate-800 p-5 rounded-xl shadow-md flex items-center space-x-4">
+    <div className={`p-3 rounded-full ${iconBgColor}`}>{icon}</div>
+    <div>
+      <p className="text-sm text-slate-500 dark:text-slate-400">{title}</p>
+      <h3 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{value}</h3>
     </div>
+  </div>
 );
 
-if (loading) {
-  return (
-    <div className="flex items-center justify-center h-screen">
-      <p>Đang tải dữ liệu...</p>
-    </div>
-  );
-}
-// --- COMPONENT CHÍNH ---
+// === ✅ COMPONENT CHÍNH ===
 export default function DashboardContent() {
-const [user, loading] = useAuthState(auth);
-    const router = useRouter();
+  const [user, authLoading] = useAuthState(auth); // Đổi tên rõ ràng
+  const router = useRouter();
 
-    const [allBills, setAllBills] = useState([]);
-    const [allProducts, setAllProducts] = useState([]);
-    const [allCustomers, setAllCustomers] = useState([]);
-    const [initialDataLoading, setInitialDataLoading] = useState(true); 
+  const [allBills, setAllBills] = useState([]);
+  const [allProducts, setAllProducts] = useState([]);
+  const [allCustomers, setAllCustomers] = useState([]);
+  const [initialDataLoading, setInitialDataLoading] = useState(true); 
 
-    const defaultRange = { from: startOfDay(new Date()), to: endOfDay(new Date()) };
-    const [activeRange, setActiveRange] = useState(defaultRange);
-    const [activePreset, setActivePreset] = useState('today');
-    const [tempRange, setTempRange] = useState(defaultRange);
-    const [isPickerOpen, setIsPickerOpen] = useState(false);
-    const pickerRef = useRef(null);
-    
-    useEffect(() => { if (!authLoading && !user) router.push('/login'); }, [user, authLoading, router]);
+  const defaultRange = { from: startOfDay(new Date()), to: endOfDay(new Date()) };
+  const [activeRange, setActiveRange] = useState(defaultRange);
+  const [activePreset, setActivePreset] = useState('today');
+  const [tempRange, setTempRange] = useState(defaultRange);
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const pickerRef = useRef(null);
+
+  // ✅ Kiểm tra login sau khi auth load xong
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push('/login');
+    }
+  }, [user, authLoading, router]);
+
+  // ✅ Render loading nếu auth chưa load
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-slate-100 dark:bg-slate-900">
+        <p>Đang kiểm tra đăng nhập...</p>
+      </div>
+    );
+  }
+
+  // ✅ Tránh render khi chưa có user
+  if (!user) return null;
+
+
 
     // TẢI DỮ LIỆU BAN ĐẦU (7 NGÀY GẦN NHẤT)
     useEffect(() => {

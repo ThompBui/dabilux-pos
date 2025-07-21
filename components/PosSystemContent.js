@@ -30,6 +30,7 @@ import Image from 'next/image';
 import ProductSkeleton from './ProductSkeleton';
 import { usePayOS, PayOSConfig } from '@payos/payos-checkout';
 import FlyingImage from './FlyingImage';
+import PayOSModal from '@/components/PayOSModal';
 // --- HÀM HỖ TRỢ & COMPONENT CON ---
 const formatCurrency = (amount) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount || 0);
 const parseCurrency = (string) => parseFloat(String(string).replace(/[^\d]/g, '')) || 0;
@@ -470,14 +471,25 @@ const fetchProducts = useCallback(async (category, loadMore = false) => {
             });
 
             const response = await fetch('/api/create-payment-link', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    orderCode: orderCode,
-                    amount: Math.round(totalAfterDiscount),
-                    description: `DH ${orderCode} (POS)`,
-                }),
-            });
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    orderCode: orderCode,
+    amount: Math.round(totalAfterDiscount),
+    description: `DH #${orderCode}`,
+    items: cart
+      .filter(item => item.name && item.quantity && item.price >= 0)
+      .map(item => ({
+        name: String(item.name),
+        quantity: Number(item.quantity),
+        price: Math.round(item.price * item.quantity)
+      })),
+    cancelUrl: "http://localhost:3000",
+    returnUrl: "http://localhost:3000"
+  })
+});
+
+
 
             const result = await response.json();
             if (!response.ok || result.error) {
@@ -531,6 +543,7 @@ const fetchProducts = useCallback(async (category, loadMore = false) => {
                             <Image src={storeInfo.logoUrl || 'https://placehold.co/40x40/6366f1/ffffff?text=POS'} alt="Logo" width={40} height={40} className="object-contain rounded-md bg-slate-200"/>
                             <div><h1 className="text-lg font-bold">{storeInfo.name}</h1><p className="text-xs text-slate-500 dark:text-slate-400">Quầy 01 - {user?.displayName || user?.email}</p></div>
                         </div>
+                        
                         <div className="flex items-center gap-2">
                             <div className="text-right"><p className="font-semibold text-lg">{currentTime.toLocaleTimeString('vi-VN')}</p><p className="text-xs text-slate-500 dark:text-slate-400">{currentTime.toLocaleDateString('vi-VN')}</p></div>
                             <button onClick={() => setTheme(t => t === 'light' ? 'dark' : 'light')} className="p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700" title="Đổi giao diện">{theme === 'light' ? <Moon size={20}/> : <Sun size={20}/>}</button>
@@ -626,6 +639,7 @@ const fetchProducts = useCallback(async (category, loadMore = false) => {
                         <div className="grid grid-cols-3 gap-2 pt-2">{[10000, 20000, 50000, 100000, 200000, 500000].map(value => (<button key={value} onClick={() => handleDenominationClick(value)} className="text-sm font-semibold py-2 bg-slate-200 dark:bg-slate-700 rounded-md hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">{new Intl.NumberFormat('vi-VN').format(value)}</button>))}<button onClick={handleClearCashReceived} className="col-span-3 text-sm font-semibold py-2 bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300 rounded-md hover:bg-red-200 dark:hover:bg-red-900 transition-colors">Xóa</button></div>
                         <div className="flex justify-between items-center text-xl font-bold text-green-600 dark:text-green-400"><span>Tiền thừa</span><span>{formatCurrency(changeAmount)}</span></div>
                     </div>
+                    
                     <div className="p-4 mt-auto bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-700">
                         <div className="grid grid-cols-2 gap-3 mb-3">
                             <button onClick={() => setActivePaymentMethod('cash')} className={`btn-payment ${activePaymentMethod === 'cash' ? 'active' : ''}`}><Wallet size={18}/>Tiền mặt</button>
@@ -645,4 +659,5 @@ const fetchProducts = useCallback(async (category, loadMore = false) => {
             <QrPaymentModal isOpen={isQrModalOpen} onClose={() => setIsQrModalOpen(false)} amount={totalAfterDiscount} checkoutUrl={paymentLinkData?.checkoutUrl} qrCode={paymentLinkData?.qrCode} status={payosStatus} />
         </>
     );
+    
 }

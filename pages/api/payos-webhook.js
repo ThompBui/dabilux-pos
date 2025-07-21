@@ -1,6 +1,56 @@
-import PayOS from "@payos/node";
-import { db } from '../../firebase-admin.js';
+import PayOS from '@payos/node';
+import getRawBody from 'raw-body';
 
+// Khởi tạo PayOS SDK với các biến môi trường
+const payos = new PayOS(
+  process.env.PAYOS_CLIENT_ID,
+  process.env.PAYOS_API_KEY,
+  process.env.PAYOS_CHECKSUM_KEY
+);
+
+export default async function handler(req, res) {
+  // Chỉ chấp nhận POST
+  if (req.method !== 'POST') {
+    return res.status(405).json({ message: 'Method not allowed' });
+  }
+
+  try {
+    // Lấy raw body từ request
+    const raw = await getRawBody(req);
+    const rawString = raw.toString('utf-8');
+    const bodyJson = JSON.parse(rawString);
+
+    console.log('📩 Webhook received body:', bodyJson);
+
+    // Kiểm tra chữ ký (checksum)
+    const isValid = payos.verifyPaymentWebhookData(bodyJson);
+
+    if (!isValid) {
+      console.warn('❌ Invalid signature from PayOS');
+      return res.status(400).json({ message: 'Invalid signature' });
+    }
+
+    // ✅ Dữ liệu hợp lệ — xử lý tại đây (ghi log, cập nhật DB, gửi mail, ...)
+    console.log('✅ Webhook hợp lệ:', bodyJson);
+
+    return res.status(200).json({ message: 'Webhook received' });
+  } catch (err) {
+    console.error('❌ Webhook error:', err);
+    return res.status(500).json({ message: 'Webhook processing failed', error: err.message });
+  }
+}
+
+// ⚠️ Tắt bodyParser để dùng raw-body
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+import PayOS from "@payos/node";
+import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "../../firebase"; // Hãy chắc chắn đường dẫn này đúng tới file firebase.js của bạn
+
+// SỬA LỖI DỨT ĐIỂM: Khởi tạo PayOS bằng một OBJECT chứa các key
 const payos = new PayOS({
   clientId: process.env.PAYOS_CLIENT_ID,
   apiKey: process.env.PAYOS_API_KEY,
@@ -8,72 +58,44 @@ const payos = new PayOS({
 });
 
 export default async function handler(req, res) {
-  // 1. Đảm bảo chỉ chấp nhận phương thức POST
+  // Chỉ chấp nhận phương thức POST
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    res.setHeader('Allow', 'POST');
+    return res.status(405).json({ error: 'Method Not Allowed' });
   }
+
+  const webhookData = req.body;
 
   try {
-    // 2. XÁC MINH DỮ LIỆU WEBHOOK
-    // Đây là bước quan trọng nhất. Nó kiểm tra chữ ký số để đảm bảo
-    // yêu cầu đến từ PayOS và không bị giả mạo hoặc thay đổi.
-    // Nếu xác minh thất bại, nó sẽ ném ra lỗi.
-    const webhookData = payos.verifyPaymentWebhookData(req.body);
-    
+    // 1. Xác thực dữ liệu từ PayOS gửi qua
+    const verifiedData = payos.verifyPaymentWebhookData(webhookData);
 
-    const orderCode = String(webhookData.orderCode); // Lấy mã đơn hàng từ dữ liệu webhook
+    // Nếu xác thực thành công, verifiedData sẽ chứa thông tin giao dịch
+    if (verifiedData) {
+      console.log('Webhook đã được xác thực thành công:', verifiedData);
 
-    // --- Bắt đầu phần CẬP NHẬT DATABASE CỦA BẠN ---
-    // Ví dụ giả định bạn có một collection 'orders' trong database
-    // và mỗi đơn hàng có một document ID chính là orderCode.
+      // 2. Lấy orderCode từ dữ liệu đã xác thực
+      const orderCode = verifiedData.orderCode;
 
-    // const orderRef = db.collection('orders').doc(orderCode); // Tham chiếu đến tài liệu đơn hàng
+      // 3. Cập nhật trạng thái đơn hàng trong Firestore
+      const transactionRef = doc(db, 'transactions', String(orderCode));
+      await updateDoc(transactionRef, {
+        status: 'PAID', // Cập nhật trạng thái
+        webhookReceivedAt: serverTimestamp(), // Ghi lại thời gian nhận webhook
+        payosData: verifiedData, // Lưu lại toàn bộ dữ liệu từ PayOS để đối soát
+      });
+      
+      console.log(`Giao dịch ${orderCode} đã được cập nhật thành PAID.`);
 
-    if (webhookData.desc === 'success') {
-      // 3. Xử lý khi thanh toán THÀNH CÔNG
-      // Cập nhật trạng thái đơn hàng trong database của bạn thành 'PAID' hoặc 'COMPLETED'
-      // Đồng thời lưu các thông tin giao dịch quan trọng nếu cần (reference, transactionDateTime, v.v.)
-      // await orderRef.update({
-      //   status: 'PAID',
-      //   transactionReference: webhookData.reference,
-      //   transactionDateTime: webhookData.transactionDateTime,
-      //   // ... thêm các thông tin khác từ webhookData vào database của bạn
-      // });
-      console.log(`Webhook: Đã xác nhận thanh toán thành công cho đơn hàng: ${orderCode}`);
-
-      // TODO: Thêm logic nghiệp vụ khác tại đây
-      // - Gửi email xác nhận đơn hàng cho khách hàng
-      // - Cập nhật số lượng sản phẩm trong kho
-      // - Ghi log chi tiết giao dịch
-      // - ...
-    } else {
-      // 4. Xử lý khi thanh toán THẤT BẠI hoặc BỊ HỦY
-      // Cập nhật trạng thái đơn hàng trong database của bạn thành 'CANCELLED' hoặc 'FAILED'
-      // await orderRef.update({
-      //   status: 'CANCELLED',
-      //   cancellationReason: webhookData.desc,
-      //   // ...
-      // });
-      console.log(`Webhook: Thanh toán thất bại/hủy cho đơn hàng: ${orderCode}. Lý do: ${webhookData.desc}`);
-
-      // TODO: Thêm logic nghiệp vụ khác tại đây
-      // - Gửi thông báo cho khách hàng về việc hủy đơn
-      // - Hoàn tác các thay đổi nếu cần
+      // 4. Phản hồi thành công cho PayOS
+      return res.status(200).json({ success: true, message: 'Webhook received and processed.' });
     }
-
-    // --- Kết thúc phần CẬP NHẬT DATABASE CỦA BẠN ---
-
-    // 5. PHẢN HỒI LẠI CHO PAYOS ĐỂ XÁC NHẬN ĐÃ NHẬN WEBHOOK
-    // Đây là BẮT BUỘC. Nếu bạn không trả về status 200 OK,
-    // PayOS sẽ cho rằng webhook chưa được xử lý và sẽ thử gửi lại nhiều lần.
-    res.status(200).json({ success: true, message: "Webhook processed" });
-
   } catch (error) {
-    // 6. Xử lý lỗi trong quá trình xử lý webhook
-    console.error('Webhook verification failed or processing error:', error);
-    // Trả về lỗi 400 hoặc 401 nếu xác minh chữ ký thất bại
-    // hoặc 500 nếu có lỗi trong quá trình xử lý database của bạn.
-    // Điều này sẽ khiến PayOS thử gửi lại webhook.
-    res.status(400).json({ error: 'Webhook processing failed', details: error.message });
+    console.error('Xác thực Webhook thất bại hoặc có lỗi xử lý:', error);
+    // Nếu xác thực thất bại, trả về lỗi 400
+    return res.status(400).json({ error: 'Webhook verification failed.' });
   }
+  
+  // Trường hợp dữ liệu không hợp lệ mà không gây ra lỗi
+  return res.status(400).json({ error: 'Invalid data.' });
 }

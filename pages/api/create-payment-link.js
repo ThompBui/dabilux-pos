@@ -1,6 +1,6 @@
 import PayOS from "@payos/node";
 
-// SỬA LỖI: Khởi tạo PayOS bằng một object chứa các key
+// SỬA LỖI DỨT ĐIỂM: Khởi tạo PayOS bằng một OBJECT chứa các key
 const payos = new PayOS({
   clientId: process.env.PAYOS_CLIENT_ID,
   apiKey: process.env.PAYOS_API_KEY,
@@ -29,27 +29,20 @@ export default async function handler(req, res) {
       orderCode: Number(orderCode),
       amount: numericAmount,
       description: description,
-      cancelUrl: `${process.env.NEXT_PUBLIC_BASE_URL}`,
-      returnUrl: `${process.env.NEXT_PUBLIC_BASE_URL}`,
+      cancelUrl: `${process.env.NEXT_PUBLIC_BASE_URL}/checkout`, // Quay về trang checkout
+      returnUrl: `${process.env.NEXT_PUBLIC_BASE_URL}/checkout`, // Quay về trang checkout
       items: req.body.items || [],
     };
 
+    console.log("Đang gửi dữ liệu tới PayOS:", paymentData);
+
     const paymentLink = await payos.createPaymentLink(paymentData);
 
-    // Trả về dữ liệu cần thiết cho Frontend
+    // Trả về đúng cấu trúc mà frontend đang mong đợi
     res.status(200).json({
       error: 0,
       message: 'Success',
-      data: {
-        bin: paymentLink.bin,
-        accountNumber: paymentLink.accountNumber,
-        accountName: paymentLink.accountName,
-        amount: paymentLink.amount,
-        description: paymentLink.description,
-        orderCode: paymentLink.orderCode,
-        qrCode: paymentLink.qrCode,
-        checkoutUrl: paymentLink.checkoutUrl,
-      },
+      data: paymentLink,
     });
   } catch (error) {
     console.error('PayOS API Error:', error);

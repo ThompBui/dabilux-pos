@@ -453,9 +453,13 @@ const handleCreatePayOSLink = async () => {
                     </div>
                     <div className="p-4 mt-auto bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-700">
                         <div className="grid grid-cols-2 gap-3 mb-3">
-                            <button onClick={() => setActivePaymentMethod('cash')} className={`btn-payment ${activePaymentMethod === 'cash' ? 'active' : ''}`}><Wallet size={18}/>Tiền mặt</button>
-                            <button onClick={() => setActivePaymentMethod('qr')} className={`btn-payment ${activePaymentMethod === 'qr' ? 'active' : ''}`}><QrCode size={18}/>Quét mã QR</button>
-                        </div>
+    <button onClick={() => setActivePaymentMethod('cash')} className={`btn-payment ${activePaymentMethod === 'cash' ? 'active' : ''}`}>
+        <Wallet size={18}/>Tiền mặt
+    </button>
+    <button onClick={() => setActivePaymentMethod('qr')} className={`btn-payment ${activePaymentMethod === 'qr' ? 'active' : ''}`}>
+        <QrCode size={18}/>Quét mã QR
+    </button>
+</div>
                         <div className="flex gap-3 mb-3"><button onClick={handleHoldBill} disabled={cart.length === 0} className="flex-1 btn-action-outline bg-amber-500/10 border-amber-500 text-amber-600 hover:bg-amber-500/20 disabled:opacity-50"><PauseCircle size={18}/>Giữ hóa đơn</button></div>
                         <button id="payment-button" onClick={initiateCheckout} disabled={cart.length === 0} className="w-full bg-indigo-600 text-white font-bold text-lg py-4 rounded-xl hover:bg-indigo-700 disabled:bg-slate-400"><div className="flex items-center justify-center gap-3"><CheckCircle size={20}/><span>THANH TOÁN (F9)</span></div></button>
                     </div>

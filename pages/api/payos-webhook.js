@@ -1,5 +1,5 @@
 import PayOS from "@payos/node";
-import { db } from '../../firebase-admin'; // Dùng admin SDK
+import { db } from '../../firebase-admin.js';
 
 const payos = new PayOS(
   process.env.PAYOS_CLIENT_ID,

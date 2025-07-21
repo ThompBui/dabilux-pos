@@ -42,8 +42,8 @@ export default async function handler(req, res) {
       amount: numericAmount,
       description: description,
       items: items,
-      cancelUrl: `${NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}`, // Dùng biến môi trường, nếu không có thì fallback về localhost
-      returnUrl: `${NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}`,
+      cancelUrl: `${NEXT_PUBLIC_BASE_URL }`, // Dùng biến môi trường, nếu không có thì fallback về localhost
+      returnUrl: `${NEXT_PUBLIC_BASE_URL }`,
     };
 
     console.log("Đang gửi dữ liệu tới PayOS:", JSON.stringify(paymentData, null, 2));

@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/router';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '../firebase'; // Import auth từ file firebase.js
+import { auth } from '../lib/firebase-client';
 import { ShoppingBasket } from 'lucide-react';
 
 export default function LoginPage() {

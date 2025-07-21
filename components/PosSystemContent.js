@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { db, auth } from '../lib/firebase-client';
+import { db, auth } from '../lib/firebase-client.js';
 import {
   collection,
   addDoc,

@@ -1,6 +1,6 @@
 import PayOS from "@payos/node";
 import admin from 'firebase-admin'; // Import admin để dùng các hàm đặc biệt
-import { db_server } from '../../lib/firebase-admin';
+import { db_server } from '../../lib/firebase-admin.js';
 const payos = new PayOS(process.env.PAYOS_CLIENT_ID, process.env.PAYOS_API_KEY, process.env.PAYOS_CHECKSUM_KEY);
 
 export default async function handler(req, res) {

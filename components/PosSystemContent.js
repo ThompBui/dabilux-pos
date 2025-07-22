@@ -249,7 +249,22 @@ export default function PosSystemContent() {
         const sub = cart.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 0), 0);
         return { subtotal: sub, tax: sub * 0.1, total: sub * 1.1 };
     }, [cart]);
+const sortedProducts = useMemo(() => {
+        // Tạo một bản sao của mảng products để không thay đổi state gốc
+        return [...products].sort((a, b) => {
+            const aInStock = a.stock > 0;
+            const bInStock = b.stock > 0;
 
+            // Nếu A còn hàng và B hết hàng, đẩy A lên trước
+            if (aInStock && !bInStock) return -1;
+            
+            // Nếu A hết hàng và B còn hàng, đẩy B lên trước
+            if (!aInStock && bInStock) return 1;
+            
+            // Nếu cả hai cùng trạng thái (cùng còn hoặc cùng hết), giữ nguyên thứ tự (theo tên đã sắp xếp từ Firestore)
+            return 0; 
+        });
+    }, [products]); 
     const discountAmount = useMemo(() => {
         const requestedPoints = parseCurrency(pointsToUse);
         if (!currentCustomer || requestedPoints <= 0) return 0;
@@ -407,6 +422,17 @@ export default function PosSystemContent() {
                 const billData = { items: saleCart, customer: finalCustomerData, subtotal: saleSubtotal, tax: saleTax, discountAmount: saleDiscountAmount, totalAfterDiscount: saleTotalAfterDiscount, paymentMethod, createdBy: user.email, createdAt: serverTimestamp(), pointsEarned: pointsEarnedThisTransaction, pointsUsed: finalCustomerData ? Math.min(salePointsUsed, saleCustomer.points || 0) : 0, storeInfo };
                 transaction.set(doc(collection(db, 'bills')), billData);
                 setLastReceiptData({ ...billData, createdAt: new Date(), customer: finalCustomerData, storeInfo });
+            setProducts(prevProducts => {
+                const updatedProducts = [...prevProducts]; // Tạo một bản sao
+                saleCart.forEach(soldItem => {
+                    const productIndex = updatedProducts.findIndex(p => p.id === soldItem.id);
+                    if (productIndex !== -1) {
+                        const newStock = updatedProducts[productIndex].stock - soldItem.quantity;
+                        updatedProducts[productIndex] = { ...updatedProducts[productIndex], stock: newStock };
+                    }
+                });
+                return updatedProducts;
+            });
             });
             setShowReceiptModal(true);
             resetTransaction();
@@ -611,17 +637,17 @@ const handleCreatePayOSLink = async () => {
                         {/* SỬA LỖI BỐ CỤC: Thay đổi class của grid */}
                         <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
                             {dataLoading && products.length === 0 ? (
-                                Array.from({ length: 18 }).map((_, i) => <ProductSkeleton key={i} />)
-                            ) : (
-                                products.map(product => (
-                                    <div key={product.id} onClick={product.stock > 0 ? (e) => handleAddToCart(product, e) : undefined} className={`relative bg-white dark:bg-slate-800 rounded-lg p-3 flex flex-col items-center text-center transform transition-all duration-200 shadow-md ${product.stock > 0 ? 'cursor-pointer hover:scale-105 hover:shadow-lg' : 'opacity-50 grayscale cursor-not-allowed'}`}>
-                                        {product.stock <= 0 && (<span className="absolute top-2 right-2 badge badge-destructive z-10">Hết hàng</span>)}
-                                        <Image src={product.imageUrl || 'https://placehold.co/80x80/e2e8f0/64748b?text=Ảnh'} alt={product.name} width={80} height={80} className="w-20 h-20 object-cover rounded-md mb-2"/>
-                                        <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex-grow">{product.name}</div>
-                                        <div className="text-lg font-bold text-indigo-600 dark:text-indigo-400 mt-2">{formatCurrency(product.price)}</div>
-                                    </div>
-                                ))
-                            )}
+        Array.from({ length: 18 }).map((_, i) => <ProductSkeleton key={i} />)
+    ) : (
+        sortedProducts.map(product => ( // <<-- ĐÃ THAY ĐỔI SANG sortedProducts
+            <div key={product.id} onClick={product.stock > 0 ? (e) => handleAddToCart(product, e) : undefined} className={`relative bg-white dark:bg-slate-800 rounded-lg p-3 flex flex-col items-center text-center transform transition-all duration-200 shadow-md ${product.stock > 0 ? 'cursor-pointer hover:scale-105 hover:shadow-lg' : 'opacity-50 grayscale cursor-not-allowed'}`}>
+                {product.stock <= 0 && (<span className="absolute top-2 right-2 badge badge-destructive z-10">Hết hàng</span>)}
+                <Image src={product.imageUrl || 'https://placehold.co/80x80/e2e8f0/64748b?text=Ảnh'} alt={product.name} width={80} height={80} className="w-20 h-20 object-cover rounded-md mb-2"/>
+                <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex-grow">{product.name}</div>
+                <div className="text-lg font-bold text-indigo-600 dark:text-indigo-400 mt-2">{formatCurrency(product.price)}</div>
+            </div>
+        ))
+    )}
                             {!dataLoading && hasMoreProducts && (
                                 <div className="col-span-full mt-4 flex justify-center">
                                     <button onClick={() => fetchProducts(activeCategory, true)} className="btn-action-outline bg-white dark:bg-slate-700">Tải thêm sản phẩm...</button>

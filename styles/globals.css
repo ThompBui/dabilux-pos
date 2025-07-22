@@ -1,0 +1,130 @@
+/* styles/globals.css */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-100 dark:bg-slate-900;
+    font-family: 'Inter', sans-serif;
+  }
+}
+
+/* Các lớp CSS tùy chỉnh cho hiệu ứng popup */
+.popup-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+.popup-overlay.active {
+    opacity: 1;
+    visibility: visible;
+}
+
+.popup-container {
+    background-color: #ffffff;
+    border-radius: 1.5rem;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    width: 90%;
+    max-width: 480px;
+    transform: translateY(20px);
+    opacity: 0;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.popup-overlay.active .popup-container {
+    transform: translateY(0);
+    opacity: 1;
+}
+
+/* Gộp tất cả các lớp component vào một khối duy nhất */
+@layer components {
+    /* Lớp cho các khung card chính */
+    .card {
+        @apply bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md;
+    }
+
+    /* Lớp cho tiêu đề card */
+    .card-header {
+        @apply text-xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-4;
+    }
+
+    /* Lớp cho input chung */
+    .input-field {
+        @apply w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200;
+    }
+
+    /* Lớp badge */
+    .badge {
+      @apply inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors;
+    }
+    .badge-destructive {
+      @apply badge border-transparent bg-red-500 text-white dark:bg-red-700 dark:text-red-100;
+    }
+
+    /* Các loại nút bấm */
+    .btn-action {
+      @apply inline-flex items-center gap-2 px-3 py-2 bg-slate-100 text-slate-700 rounded-lg font-semibold transition-colors dark:bg-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600;
+    }
+    .btn-action-outline {
+      @apply inline-flex items-center gap-2 px-3 py-2 bg-transparent border border-slate-300 dark:border-slate-600 rounded-lg font-semibold transition-colors hover:bg-slate-100 dark:hover:bg-slate-700;
+    }
+    .btn-payment {
+      @apply flex items-center justify-center gap-2 p-3 bg-slate-100 dark:bg-slate-700 rounded-xl font-semibold transition-colors hover:bg-slate-200 dark:hover:bg-slate-600;
+    }
+    .btn-payment.active {
+      @apply bg-indigo-100 text-indigo-600 ring-2 ring-indigo-500 dark:bg-indigo-900/50 dark:text-indigo-300;
+    }
+    .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition-colors disabled:bg-slate-400;
+}
+    .btn-primary-sm {
+        @apply inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700;
+    }
+    .btn-secondary {
+        @apply px-4 py-2 bg-slate-200 text-slate-800 rounded-lg hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600;
+    }
+    .btn-danger {
+        @apply px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700;
+    }
+
+    /* Các nút icon nhỏ */
+    .btn-icon-edit {
+        @apply p-1.5 text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-full;
+    }
+    .btn-icon-delete {
+        @apply p-1.5 text-red-600 hover:bg-red-100 dark:hover:bg-red-900/50 rounded-full;
+    }
+
+    /* Lớp cho bảng */
+    .th-custom { 
+      @apply px-4 py-3; 
+    }
+    .td-custom { 
+      @apply px-4 py-3 border-b border-slate-200 dark:border-slate-700;
+    }
+    .table-header {
+        @apply text-xs text-slate-500 dark:text-slate-400 uppercase bg-slate-50 dark:bg-slate-700/50;
+    }
+    .table-row {
+        @apply border-b dark:border-slate-700 last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors;
+    }
+    
+    /* Input số lượng */
+    .quantity-input {
+      @apply w-16 text-center font-semibold bg-slate-100 dark:bg-slate-700 rounded-md p-1 border border-slate-300 dark:border-slate-600;
+    }
+}
